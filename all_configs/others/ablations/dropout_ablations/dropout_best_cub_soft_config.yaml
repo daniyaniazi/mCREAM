@@ -1,0 +1,32 @@
+mode: train_cbm
+seed: [42,7,1,134,89]
+dataset_name: CUB
+dataset_params:
+  batch_size: 64
+  workers: 8
+  return_concepts: true
+model_name: Standard_CUB
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CUB/CUB_DAG_only_Gc.csv
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 648
+  num_side_channel: 200
+  num_concepts: 112
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: [0.0001, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99]
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300

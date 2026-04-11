@@ -1,0 +1,20 @@
+mode: train_c2y
+seed: 42
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: True
+  return_images: False
+  class_name: unfair
+model_name:  "c2y"
+paths:
+  default_root_dir: "./experiments/"
+  metric_dir: "./last_metrics/"
+hyperparameters:
+  num_classes: 1
+  num_concepts: 7
+  learning_rate: 0.001
+  linear_classifier: true
+trainer_param:
+  max_epochs: 200

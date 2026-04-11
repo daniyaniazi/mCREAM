@@ -1,0 +1,27 @@
+mode: train_cbm
+seed: [42,7,1,134,89]
+dataset_name: CUB
+dataset_params:
+  batch_size: 64
+  workers: 2
+  return_concepts: true
+model_name: Standard_CUB
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CUB/CUB_DAG_only_Gc.csv
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 512
+  num_concepts: 112
+  num_side_channel: 0
+  masking_algorithm: none
+  last_layer_mask: false
+  concept_representation: soft
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300

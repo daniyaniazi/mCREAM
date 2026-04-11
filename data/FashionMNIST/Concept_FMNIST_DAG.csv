@@ -1,0 +1,19 @@
+,Clothes,Tops,Bottoms,Dresses,Outers,Goods,Accessories,Shoes,T-Shirt,Trouser,Pullover,Dress,Coat,Sandal,Shirt,Sneaker,Bag,Ankle boot
+Clothes,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Tops,True,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Bottoms,True,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Dresses,True,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Outers,True,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False
+Goods,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False
+Accessories,False,False,False,False,False,True,True,False,False,False,False,False,False,False,False,False,False,False
+Shoes,False,False,False,False,False,True,False,True,False,False,False,False,False,False,False,False,False,False
+T-Shirt,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False
+Trouser,False,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False
+Pullover,False,True,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False
+Dress,False,False,False,True,False,False,False,False,False,False,False,True,False,False,False,False,False,False
+Coat,False,False,False,False,True,False,False,False,False,False,False,False,True,False,False,False,False,False
+Sandal,False,False,False,False,False,False,False,True,False,False,False,False,False,True,False,False,False,False
+Shirt,False,True,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False
+Sneaker,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,True,False,False
+Bag,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,True,False
+Ankle boot,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,True

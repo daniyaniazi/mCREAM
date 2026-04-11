@@ -1,0 +1,20 @@
+mode: train_x2y
+seed: [42,7,1,134,89]
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+  return_concepts: false
+
+model_name: Standard_CelebA
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+hyperparameters:
+  num_classes: 1
+  learning_rate: 0.0001
+  frozen: true
+trainer_param:
+  max_epochs: 200

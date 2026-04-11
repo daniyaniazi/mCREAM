@@ -1,0 +1,17 @@
+mode: train_x2y
+seed: [42,7,1,134,89]
+dataset_name: "FMNIST"
+dataset_params:
+  batch_size: 256
+  workers: 2
+model_name: "Standard_FashionMNIST"
+paths:
+  default_root_dir: "./experiments/"
+  metric_dir: "./last_metrics/"
+  input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
+hyperparameters:
+  num_classes: 10
+  learning_rate: 0.001
+  frozen: true
+trainer_param:
+  max_epochs: 50

@@ -1,0 +1,28 @@
+mode: train_cbm
+seed: [42,7,1,134,89]
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+  return_concepts: true
+model_name: Standard_CelebA
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/final_DAG_unfair.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+hyperparameters_model2:
+  num_classes: 1
+  num_exogenous: 512
+  num_concepts: 7
+  num_side_channel: 0
+  masking_algorithm: none
+  last_layer_mask: false
+  concept_representation: soft
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300

@@ -1,0 +1,33 @@
+mode: train_cbm
+seed: [42,7,1,134,89]
+dataset_name: Complete_Concept_FMNIST
+dataset_params:
+  batch_size: 256
+  workers: 4
+  return_labels: true
+  return_images: true
+model_name: Standard_FashionMNIST
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv
+  input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
+  softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
+hyperparameters_model2:
+  num_classes: 10
+  num_exogenous: 128
+  num_side_channel: 40
+  num_concepts: 11
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: [0,1,2,3,5]
+  previous_model_output_size: 128
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 50

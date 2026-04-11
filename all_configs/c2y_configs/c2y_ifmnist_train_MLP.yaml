@@ -1,0 +1,19 @@
+mode: "train_c2y"
+seed: 42
+dataset_name: Concept_FMNIST
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: True
+  return_images: False
+model_name: "c2y"
+paths:
+  default_root_dir: "./experiments/"
+  metric_dir: "./last_metrics/"
+hyperparameters:
+  num_classes: 10
+  num_concepts: 8
+  learning_rate: 0.001
+  linear_classifier: false
+trainer_param:
+  max_epochs: 50
