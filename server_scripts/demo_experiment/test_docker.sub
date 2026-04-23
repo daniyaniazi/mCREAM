@@ -1,0 +1,21 @@
+universe                = docker
+docker_image            = nvidia/cuda:11.4.3-runtime-ubuntu20.04
+executable              = test_execute.sh
+arguments               = demo.py
+
+# Paths to output, error, and log files
+output                  = /home/dani00003/mCREAM/logs/cream.$(ClusterId).$(ProcId).out
+error                   = /home/dani00003/mCREAM/logs/cream.$(ClusterId).$(ProcId).err
+log                     = /home/dani00003/mCREAM/logs/cream.$(ClusterId).log
+
+should_transfer_files   = YES
+
+# Remove this when using interactive mode
+when_to_transfer_output = ON_EXIT
+
+request_GPUs = 1
+request_CPUs = 1
+request_memory = 8G
+requirements = UidDomain == "cs.uni-saarland.de" 
++WantGPUHomeMounted = true
+queue 1
