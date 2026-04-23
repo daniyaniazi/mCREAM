@@ -1,5 +1,5 @@
 universe                = docker
-docker_image            = nvidia/cuda:11.4.3-runtime-ubuntu20.04
+docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 executable              = test_execute.sh
 arguments               = demo.py
 
