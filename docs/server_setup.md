@@ -26,16 +26,17 @@ mkdir -p logs
 Create venv once:
 
 ```bash
-python3 -m venv ~/.venvs/mcream
-source ~/.venvs/mcream/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+cd ~/mCREAM
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
 Quick check:
 
 ```bash
-python -c "import torch, pytorch_lightning, yaml; print('torch=', torch.__version__, 'cuda=', torch.cuda.is_available(), 'cuda_version=', torch.version.cuda)"
+~/mCREAM/.venv/bin/python -c "import torch, pytorch_lightning, torchvision, yaml; print('ok')"
 ```
 
 Note: On login node, cuda may show False. GPU check must be done inside a Condor GPU job.

@@ -1,4 +1,9 @@
+.venv/
+
 pretrained_models/
 logs/
 Miniconda*.sh
 .env
+
+
+server_scripts/
