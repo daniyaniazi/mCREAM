@@ -1,5 +1,6 @@
 mode: train_cbm
-seed: [42,7,1,134,89]
+seed: 42
+# # seed: [42,7,1,134,89]
 dataset_name: CelebA
 dataset_params:
   batch_size: 256
