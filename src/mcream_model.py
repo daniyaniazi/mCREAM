@@ -617,13 +617,7 @@ class mCREAM_Full(pl.LightningModule):
         return y, c, c_logits
     
     def training_step(self, batch, batch_idx):
-        x, true_concepts, y_true = batch
-        y_pred, c_pred, c_logits = self(x)
-        
-        # Delegate to mCREAM's loss computation
-        loss, metrics = self.u_to_CY._compute_loss((x, true_concepts, y_true), "train")
-        
-        # But we need to recompute since we used full forward
+        """Training step using full forward pass (x → u → c,y)."""
         loss, metrics = self._compute_loss(batch, "train")
         self.log_dict(metrics, prog_bar=True)
         return loss
