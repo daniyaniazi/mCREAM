@@ -542,3 +542,170 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         r_u2c = self.graph_agg_u2c.get_edge_reliabilities() if hasattr(self.graph_agg_u2c, 'get_edge_reliabilities') else None
         r_c2y = self.graph_agg_c2y.get_edge_reliabilities() if hasattr(self.graph_agg_c2y, 'get_edge_reliabilities') else None
         return r_u2c, r_c2y
+
+
+# =============================================================================
+# Full mCREAM Model (with backbone) - Similar to Template_CBM_MultiClass
+# =============================================================================
+
+def freeze_model(model: nn.Module) -> None:
+    """Freeze model parameters."""
+    model.eval()
+    for param in model.parameters():
+        param.requires_grad = False
+
+
+class mCREAM_Full(pl.LightningModule):
+    """
+    Full mCREAM model combining backbone (x→u) with mCREAM_UtoC_Y (u→c,y).
+    
+    This is analogous to CREAM's Template_CBM_MultiClass.
+    
+    Architecture:
+        x (image) → backbone (x2u) → u (features) → mCREAM_UtoC_Y → (y, c)
+    """
+    
+    def __init__(
+        self,
+        backbone: pl.LightningModule,
+        mcream_model: mCREAM_UtoC_Y,
+        frozen_backbone: bool = True,
+        learning_rate: float = 0.001,
+    ):
+        """
+        Args:
+            backbone: Pretrained backbone model (e.g., FashionMNIST_for_CBM)
+            mcream_model: The mCREAM_UtoC_Y model
+            frozen_backbone: Whether to freeze the backbone
+            learning_rate: Learning rate for optimizer
+        """
+        super().__init__()
+        
+        self.x_to_u = backbone
+        self.u_to_CY = mcream_model
+        self.frozen_backbone = frozen_backbone
+        self.learning_rate = learning_rate
+        
+        if frozen_backbone:
+            freeze_model(self.x_to_u)
+        
+        # Copy some attributes from mcream_model for convenience
+        self.num_classes = mcream_model.num_classes
+        self.num_concepts = mcream_model.num_concepts
+        self.lambda_weight = mcream_model.lambda_weight
+        
+        self.save_hyperparameters(ignore=['backbone', 'mcream_model'])
+    
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Full forward pass: image → features → concepts/task.
+        
+        Args:
+            x: Input images [batch, channels, height, width]
+        
+        Returns:
+            y: Task logits [batch, num_classes]
+            c: Concept activations [batch, num_concepts]
+            c_logits: Concept logits [batch, num_concepts]
+        """
+        # Extract features from backbone
+        u = self.x_to_u.concept_extractor(x)  # [batch, feature_dim]
+        
+        # Pass through mCREAM
+        y, c, c_logits = self.u_to_CY(u)
+        
+        return y, c, c_logits
+    
+    def training_step(self, batch, batch_idx):
+        x, true_concepts, y_true = batch
+        y_pred, c_pred, c_logits = self(x)
+        
+        # Delegate to mCREAM's loss computation
+        loss, metrics = self.u_to_CY._compute_loss((x, true_concepts, y_true), "train")
+        
+        # But we need to recompute since we used full forward
+        loss, metrics = self._compute_loss(batch, "train")
+        self.log_dict(metrics, prog_bar=True)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        loss, metrics = self._compute_loss(batch, "val")
+        self.log_dict(metrics, prog_bar=True)
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        loss, metrics = self._compute_loss(batch, "test")
+        self.log_dict(metrics)
+        return loss
+    
+    def _compute_loss(
+        self,
+        batch: Tuple[Tensor, Tensor, Tensor],
+        stage: str = "train",
+    ) -> Tuple[Tensor, dict]:
+        """Compute loss using full forward pass."""
+        x, true_concepts, y_true = batch
+        
+        # Full forward pass
+        y_pred, c_pred, c_logits = self(x)
+        
+        # Task loss
+        if self.num_classes == 1:
+            task_loss = F.binary_cross_entropy_with_logits(y_pred.squeeze(), y_true.float())
+            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+            task_acc = (task_preds == y_true).float().mean()
+        else:
+            task_loss = F.cross_entropy(y_pred, y_true)
+            task_preds = y_pred.argmax(dim=1)
+            task_acc = (task_preds == y_true).float().mean()
+        
+        # Concept loss (use logits for BCEWithLogitsLoss)
+        concept_loss = F.binary_cross_entropy_with_logits(
+            c_logits,
+            true_concepts.float()
+        )
+        concept_acc = ((c_pred > 0.5) == true_concepts).float().mean()
+        
+        # Base loss
+        base_loss = task_loss + self.lambda_weight * concept_loss
+        
+        # Graph regularization (only during training)
+        if stage == "train":
+            graph_loss_u2c = self.u_to_CY.graph_reg_loss(
+                self.u_to_CY.graph_agg_u2c, 
+                self.u_to_CY.graph_agg_u2c()
+            )
+            graph_loss_c2y = self.u_to_CY.graph_reg_loss(
+                self.u_to_CY.graph_agg_c2y,
+                self.u_to_CY.graph_agg_c2y()
+            )
+            graph_loss = graph_loss_u2c + graph_loss_c2y
+        else:
+            graph_loss = torch.tensor(0.0, device=x.device)
+        
+        total_loss = base_loss + graph_loss
+        
+        metrics = {
+            f"{stage}_task_loss": task_loss,
+            f"{stage}_concept_loss": concept_loss,
+            f"{stage}_graph_loss": graph_loss,
+            f"{stage}_task_accuracy": task_acc,
+            f"{stage}_concept_accuracy": concept_acc,
+        }
+        
+        return total_loss, metrics
+    
+    def configure_optimizers(self):
+        # Only optimize non-frozen parameters
+        params = filter(lambda p: p.requires_grad, self.parameters())
+        return torch.optim.Adam(params, lr=self.learning_rate)
+    
+    # Delegate graph analysis methods to inner model
+    def get_learned_graphs(self) -> Tuple[Tensor, Tensor]:
+        return self.u_to_CY.get_learned_graphs()
+    
+    def get_expert_weights(self) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+        return self.u_to_CY.get_expert_weights()
+    
+    def get_edge_reliabilities(self) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+        return self.u_to_CY.get_edge_reliabilities()

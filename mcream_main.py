@@ -2,13 +2,14 @@
 Training script for mCREAM (Multi-Expert CREAM).
 
 Usage:
-    python mcream_main.py --config all_configs/mcream_configs/mCREAM_cfmnist_edge_medium.yaml
+    python mcream_main.py --config all_configs/mcream_configs/cfmnist/baselines/union_M5_medium.yaml
 
 This script:
-1. Loads expert graphs (or generates them if not found)
-2. Creates mCREAM model with specified aggregation method
-3. Trains and evaluates the model
-4. Logs learned graph statistics
+1. Loads backbone model (x→u)
+2. Loads expert graphs (or generates them if not found)
+3. Creates mCREAM model with specified aggregation method
+4. Trains and evaluates the model
+5. Logs learned graph statistics
 """
 
 import argparse
@@ -24,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils import get_component_with_dicts, load_config, dict_to_csv
-from src.mcream_model import mCREAM_UtoC_Y
+from src.mcream_model import mCREAM_UtoC_Y, mCREAM_Full
 from src.expert_graphs.generation import (
     load_expert_graphs,
     generate_expert_graphs_from_dag,
@@ -96,13 +97,42 @@ def load_or_generate_expert_graphs(
         return expert_u2c, expert_c2y, u2c_star, c2y_star
 
 
+def load_backbone(config: dict, dataset_name: str):
+    """
+    Load pretrained backbone model (x → u).
+    
+    This is the same backbone loading logic as in simple_main.py.
+    """
+    model_name = config["model_name"]
+    model_class = get_component_with_dicts("model", model_name)
+    
+    if "input_model_path" in config["paths"]:
+        checkpoint_path = Path(config["paths"]["input_model_path"])
+        backbone = model_class.load_from_checkpoint(
+            checkpoint_path=checkpoint_path,
+            dataset=dataset_name,
+            frozen=config["hyperparameters"].get("frozen_model1", True),
+        )
+        print(f"Loaded backbone from: {checkpoint_path}")
+    else:
+        # Train from scratch (not recommended)
+        hyperparams = {
+            "num_classes": config["hyperparameters_model2"]["num_classes"],
+            "learning_rate": config["hyperparameters"]["learning_rate"],
+        }
+        backbone = model_class(**hyperparams)
+        print("Created new backbone (not pretrained)")
+    
+    return backbone
+
+
 def create_mcream_model(
     config: dict,
     expert_u2c_graphs: List[torch.Tensor],
     expert_c2y_graphs: List[torch.Tensor],
     mutually_exclusive_concepts: Optional[List] = None,
 ) -> mCREAM_UtoC_Y:
-    """Create mCREAM model from config."""
+    """Create mCREAM_UtoC_Y model (u→c,y part only) from config."""
     
     multi_expert = config.get("multi_expert", {})
     hparams = config["hyperparameters_model2"]
@@ -136,8 +166,33 @@ def create_mcream_model(
     return model
 
 
+def create_full_mcream_model(
+    config: dict,
+    backbone: pl.LightningModule,
+    expert_u2c_graphs: List[torch.Tensor],
+    expert_c2y_graphs: List[torch.Tensor],
+    mutually_exclusive_concepts: Optional[List] = None,
+) -> mCREAM_Full:
+    """Create full mCREAM model (backbone + u→c,y) from config."""
+    
+    # Create the u→c,y part
+    mcream_ucy = create_mcream_model(
+        config, expert_u2c_graphs, expert_c2y_graphs, mutually_exclusive_concepts
+    )
+    
+    # Wrap with backbone
+    full_model = mCREAM_Full(
+        backbone=backbone,
+        mcream_model=mcream_ucy,
+        frozen_backbone=config["hyperparameters"].get("frozen_model1", True),
+        learning_rate=config["hyperparameters"]["learning_rate"],
+    )
+    
+    return full_model
+
+
 def evaluate_learned_graphs(
-    model: mCREAM_UtoC_Y,
+    model,  # mCREAM_Full or mCREAM_UtoC_Y
     u2c_star: torch.Tensor,
     c2y_star: torch.Tensor,
 ) -> dict:
@@ -232,12 +287,16 @@ def main(config_path: str):
     print(f"  u2c shape: {expert_u2c[0].shape}")
     print(f"  c2y shape: {expert_c2y[0].shape}")
     
-    # Create model
+    # Load backbone model (x → u)
+    print(f"\nLoading backbone model...")
+    backbone = load_backbone(config, dataset_name)
+    
+    # Create full mCREAM model (backbone + u→c,y)
     print(f"\nCreating mCREAM model...")
     print(f"  Aggregation: {config.get('multi_expert', {}).get('aggregation_type', 'edge')}")
     
-    model = create_mcream_model(
-        config, expert_u2c, expert_c2y, mutually_exclusive
+    model = create_full_mcream_model(
+        config, backbone, expert_u2c, expert_c2y, mutually_exclusive
     )
     
     # Setup trainer
