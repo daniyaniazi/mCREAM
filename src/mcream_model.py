@@ -592,6 +592,7 @@ class mCREAM_Full(pl.LightningModule):
         # Copy some attributes from mcream_model for convenience
         self.num_classes = mcream_model.num_classes
         self.num_concepts = mcream_model.num_concepts
+        self.num_side_channel = mcream_model.num_side_channel
         self.lambda_weight = mcream_model.lambda_weight
         
         self.save_hyperparameters(ignore=['backbone', 'mcream_model'])

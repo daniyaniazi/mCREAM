@@ -348,6 +348,39 @@ def main(config_path: str):
         key: value.item() for key, value in trainer.callback_metrics.items()
     }
     
+    # =========================================================================
+    # Save intermediate values (like CREAM does for comparison)
+    # =========================================================================
+    pl_checkpoint_path = trainer.logger.log_dir
+    
+    from src.saving_intermediate_utils import save_intermediate_values
+    
+    print("\nSaving intermediate values for analysis...")
+    
+    # Save train set intermediate values
+    train_latent = save_intermediate_values(
+        dataset=dataset,
+        dataset_name=dataset_name,
+        model=model,
+        training_set=True,
+        DAG_path=config["paths"]["DAG_file"],
+        seed=seed,
+        save_directory=pl_checkpoint_path,
+    )
+    
+    # Save test set intermediate values
+    test_latent = save_intermediate_values(
+        dataset=dataset,
+        dataset_name=dataset_name,
+        model=model,
+        training_set=False,
+        DAG_path=config["paths"]["DAG_file"],
+        seed=seed,
+        save_directory=pl_checkpoint_path,
+    )
+    
+    print(f"  Saved to: {pl_checkpoint_path}")
+    
     # Evaluate learned graphs
     print("\nEvaluating learned graphs...")
     graph_metrics = evaluate_learned_graphs(model, u2c_star, c2y_star)
@@ -362,15 +395,27 @@ def main(config_path: str):
     print(f"    Recall: {graph_metrics['c2y_recall']:.3f}")
     print(f"    F1: {graph_metrics['c2y_f1']:.3f}")
     
-    # Compile results
+    # Compile results (CREAM-compatible format)
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
     results = {
+        # === CREAM-compatible fields ===
+        "max_epochs": max_epochs,
         "seed": seed,
-        "config_name": config_path.stem,
+        "experiment_name": config_path.stem,
+        "train_val_time": training_time / 60.0,  # minutes (same name as CREAM)
+        "test_time": test_time / 60.0,           # minutes (same name as CREAM)
+        "num_trainable_parameters": num_params,
+        
+        # === Core metrics (from trainer) ===
+        **val_train_metrics,
+        
+        # === mCREAM-specific fields ===
         "aggregation_type": config.get("multi_expert", {}).get("aggregation_type", "edge"),
         "num_experts": len(expert_u2c),
-        "training_time_min": training_time / 60.0,
-        "test_time_min": test_time / 60.0,
-        **val_train_metrics,
+        "disagreement_level": config.get("multi_expert", {}).get("disagreement_level", "medium"),
+        
+        # === Graph recovery metrics ===
         **graph_metrics,
     }
     
