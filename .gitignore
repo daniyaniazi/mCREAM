@@ -1,6 +1,11 @@
 .venv/
 
-src/__pycache__/
+# Python cache - all directories
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
 server_scripts/data/
 experiments/
 data/
