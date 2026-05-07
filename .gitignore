@@ -1,9 +1,11 @@
 .venv/
 
+src/__pycache__/
+server_scripts/data/
+experiments/
+data/
+
 pretrained_models/
 logs/
 Miniconda*.sh
 .env
-
-
-server_scripts/

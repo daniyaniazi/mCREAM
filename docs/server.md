@@ -188,8 +188,8 @@ request_memory = 64 GB
 request_gpus = 1
 +WantGPUHomeMounted = true
 
-output = logs/cream.
-(ClusterId).(ClusterId).(ProcId).outerror = logs/cream.(ClustedId).(ClusterId).(ProcId).err
+output = logs/cream.(ClusterId).(ClusterId).(ProcId).out
+error = logs/cream.(ClustedId).(ClusterId).(ProcId).err
 log = logs/cream.$(ClusterId).log
 
 queue 1
