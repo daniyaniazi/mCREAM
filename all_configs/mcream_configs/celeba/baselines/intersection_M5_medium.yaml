@@ -1,0 +1,56 @@
+# mCREAM - Intersection Baseline (M=5, Medium Disagreement) - CelebA
+# Method: Intersection of all expert graphs (most conservative)
+
+mode: train_cbm
+seed: 42
+dataset_name: CelebA
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+
+backbone_model: Standard_CelebA
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/final_DAG_unfair.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+  expert_graphs_dir: ./data/CelebA/expert_graphs/M5/medium/
+
+# =============================================================================
+# mCREAM Settings
+# =============================================================================
+multi_expert:
+  enabled: true
+  num_experts: 5
+  disagreement_level: medium
+  aggregation_type: intersection    # BASELINE: Intersection of all experts
+  graph_regularization:
+    prior_weight: 0.0
+    sparsity_weight: 0.0
+    acyclicity_weight: 0.0
+
+# =============================================================================
+# Model Hyperparameters (CREAM-compatible for CelebA)
+# =============================================================================
+hyperparameters_model2:
+  num_classes: 1
+  num_concepts: 7
+  num_exogenous: 75
+  num_side_channel: 5
+  concept_representation: soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  side_dropout: true
+  dropout_prob: 0.1
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 200
+  gradient_clip_val: null
