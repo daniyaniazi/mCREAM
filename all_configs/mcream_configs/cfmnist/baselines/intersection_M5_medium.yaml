@@ -11,7 +11,8 @@ dataset_params:
   return_labels: true
   return_images: true
 
-model_name: mCREAM_Complete_Concept_FMNIST
+# Backbone model (for feature extraction)
+backbone_model: Standard_FashionMNIST
 
 # =============================================================================
 # mCREAM Settings

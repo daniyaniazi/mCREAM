@@ -103,7 +103,19 @@ def load_backbone(config: dict, dataset_name: str):
     
     This is the same backbone loading logic as in simple_main.py.
     """
-    model_name = config["model_name"]
+    # Use backbone_model if specified, otherwise fall back to model_name
+    model_name = config.get("backbone_model") or config.get("model_name")
+    
+    if model_name is None:
+        raise ValueError("Config must specify 'backbone_model' or 'model_name'")
+    
+    # Strip any mCREAM prefix if present (e.g., "mCREAM_Complete_Concept_FMNIST" -> error)
+    if model_name.startswith("mCREAM"):
+        raise ValueError(
+            f"backbone_model should be the backbone class (e.g., 'Standard_FashionMNIST'), "
+            f"not '{model_name}'. Please update your config."
+        )
+    
     model_class = get_component_with_dicts("model", model_name)
     
     if "input_model_path" in config["paths"]:
