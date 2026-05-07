@@ -2,7 +2,6 @@
 set -euo pipefail
 
 PROJECT_ROOT="/home/dani00003/mCREAM"
-
 CONDA_PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
 
 if [ -x "$CONDA_PYTHON" ]; then
@@ -24,10 +23,17 @@ nvidia-smi || true
 "$PYTHON_BIN" -c "import torch; print('torch=', torch.__version__, 'cuda=', torch.cuda.is_available())"
 "$PYTHON_BIN" -c "import pytorch_lightning, torchvision, yaml; print('deps_ok=1')"
 
-echo "Step 1: Generate expert graphs..."
-"$PYTHON_BIN" scripts/generate_all_expert_graphs.py --dataset cfmnist
+# Check if expert graphs exist
+EXPERT_DIR="$PROJECT_ROOT/data/FashionMNIST/expert_graphs/M5/medium"
+if [ ! -d "$EXPERT_DIR" ]; then
+    echo "ERROR: Expert graphs not found at $EXPERT_DIR"
+    echo "Run generate_expert_graphs_job.sub first!"
+    exit 1
+fi
+echo "Expert graphs found: $EXPERT_DIR"
 
-echo "Step 2: Running experiment..."
+echo ""
+echo "Running experiment..."
 "$PYTHON_BIN" mcream_main.py --config all_configs/mcream_configs/cfmnist/baselines/union_M5_medium.yaml
 
 echo "Done!"
