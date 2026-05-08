@@ -43,6 +43,8 @@ hyperparameters:
 trainer_param:
   max_epochs: 50
 
+experiment_name: edge_M5_low
+
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/

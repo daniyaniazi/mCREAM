@@ -50,6 +50,8 @@ trainer_param:
   gradient_clip_val: null
   gradient_clip_algorithm: null
 
+experiment_name: edge_M5_medium
+
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/
