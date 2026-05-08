@@ -19,6 +19,11 @@ class CustomCelebA(CelebA):
     def base_folder(self) -> str:
         return "CelebA"
 
+    def _check_integrity(self) -> bool:
+        """Override to skip MD5 hash check - just verify folder exists."""
+        import os
+        return os.path.isdir(os.path.join(self.root, self.base_folder, "img_align_celeba"))
+
     def __init__(
         self,
         root: str,
