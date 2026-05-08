@@ -1,6 +1,6 @@
 universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
-executable              = run_edge_M5_low.sh
+executable              = /home/dani00003/mCREAM/server_scripts/mcream_experiment/cfmnist/edge/run_edge_M5_low.sh
 
 output                  = /home/dani00003/mCREAM/logs/mcream_edge_M5_low.$(ClusterId).$(ProcId).out
 error                   = /home/dani00003/mCREAM/logs/mcream_edge_M5_low.$(ClusterId).$(ProcId).err
