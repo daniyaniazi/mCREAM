@@ -313,12 +313,16 @@ def main(config_path: str):
     
     # Setup trainer
     max_epochs = config["trainer_param"]["max_epochs"]
+    
+    # Use experiment_name if provided, otherwise fall back to config filename
+    experiment_name = config.get("experiment_name", config_path.stem)
+    
     default_root_dir = (
         Path(config["paths"]["default_root_dir"])
         / dataset_name
         / config["mode"]
         / "mCREAM"
-        / config_path.parent.name
+        / experiment_name         # union_M5_medium, intersection_M5_medium, edge_M5_medium, etc.
     )
     
     trainer = pl.Trainer(
@@ -419,12 +423,19 @@ def main(config_path: str):
         **graph_metrics,
     }
     
-    # Save results
-    metrics_dir = default_root_dir / Path(config["paths"]["metric_dir"])
+    # Save results to version-specific directory (alongside lightning logs)
+    pl_checkpoint_path = Path(trainer.logger.log_dir)
+    results_csv_path = pl_checkpoint_path / f"{experiment_name}_results.csv"
+    
+    print(f"\nSaving results to version folder: {pl_checkpoint_path}")
+    dict_to_csv(results, pl_checkpoint_path, config_path)
+    
+    # Also save to central metrics directory for easy comparison
+    metrics_dir = Path(config["paths"]["default_root_dir"]) / "metrics" / dataset_name / "mCREAM"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     dict_to_csv(results, metrics_dir, config_path)
     
-    print(f"\nResults saved to {metrics_dir}")
+    print(f"Results also saved to: {metrics_dir}")
     print(f"{'='*60}\n")
 
 

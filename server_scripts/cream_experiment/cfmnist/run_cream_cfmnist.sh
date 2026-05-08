@@ -14,7 +14,8 @@ fi
 cd "$PROJECT_ROOT"
 
 echo "=============================================="
-echo "mCREAM: Union Baseline (M=5, Medium)"
+echo "CREAM Baseline - Complete_Concept_FMNIST"
+echo "Ground truth DAG (single expert)"
 echo "=============================================="
 echo "HOST=$(hostname)"
 "$PYTHON_BIN" -V
@@ -23,17 +24,8 @@ nvidia-smi || true
 "$PYTHON_BIN" -c "import torch; print('torch=', torch.__version__, 'cuda=', torch.cuda.is_available())"
 "$PYTHON_BIN" -c "import pytorch_lightning, torchvision, yaml; print('deps_ok=1')"
 
-# Check if expert graphs exist
-EXPERT_DIR="$PROJECT_ROOT/data/FashionMNIST/expert_graphs/M5/medium"
-if [ ! -d "$EXPERT_DIR" ]; then
-    echo "ERROR: Expert graphs not found at $EXPERT_DIR"
-    echo "Run generate_expert_graphs_job.sub first!"
-    exit 1
-fi
-echo "Expert graphs found: $EXPERT_DIR"
-
 echo ""
-echo "Running experiment..."
-"$PYTHON_BIN" mcream_main.py --config all_configs/mcream_configs/cfmnist/baselines/union_M5_medium.yaml
+echo "Running CREAM on Complete_Concept_FMNIST..."
+"$PYTHON_BIN" simple_main.py --config all_configs/best_hparams/CREAM/CREAM_best_cfmnist_soft_config.yaml
 
 echo "Done!"

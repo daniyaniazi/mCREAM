@@ -1,5 +1,5 @@
 mode: train_cbm
-seed: [42,7,1,134,89]
+seed: 42
 dataset_name: Complete_Concept_FMNIST
 dataset_params:
   batch_size: 256

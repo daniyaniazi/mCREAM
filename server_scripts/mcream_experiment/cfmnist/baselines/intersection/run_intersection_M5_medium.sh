@@ -14,7 +14,7 @@ fi
 cd "$PROJECT_ROOT"
 
 echo "=============================================="
-echo "mCREAM: Majority Baseline (M=5, Medium)"
+echo "mCREAM: Intersection Baseline (M=5, Medium)"
 echo "=============================================="
 echo "HOST=$(hostname)"
 "$PYTHON_BIN" -V
@@ -30,10 +30,9 @@ if [ ! -d "$EXPERT_DIR" ]; then
     echo "Run generate_expert_graphs_job.sub first!"
     exit 1
 fi
-echo "Expert graphs found: $EXPERT_DIR"
 
 echo ""
-echo "Running experiment..."
-"$PYTHON_BIN" mcream_main.py --config all_configs/mcream_configs/cfmnist/baselines/majority_M5_medium.yaml
+echo "Running mCREAM with Intersection aggregation..."
+"$PYTHON_BIN" mcream_main.py --config all_configs/mcream_configs/cfmnist/baselines/intersection/intersection_M5_medium.yaml
 
 echo "Done!"
