@@ -595,6 +595,13 @@ class mCREAM_Full(pl.LightningModule):
         self.num_side_channel = mcream_model.num_side_channel
         self.lambda_weight = mcream_model.lambda_weight
         
+        # Loss functions (same as CREAM)
+        if self.num_classes == 1:
+            self.task_loss_function = nn.BCEWithLogitsLoss()
+        else:
+            self.task_loss_function = nn.CrossEntropyLoss()
+        self.concept_loss_function = nn.BCEWithLogitsLoss()
+        
         self.save_hyperparameters(ignore=['backbone', 'mcream_model'])
     
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
@@ -638,27 +645,24 @@ class mCREAM_Full(pl.LightningModule):
         batch: Tuple[Tensor, Tensor, Tensor],
         stage: str = "train",
     ) -> Tuple[Tensor, dict]:
-        """Compute loss using full forward pass."""
+        """Compute loss using full forward pass (same pattern as CREAM)."""
         x, true_concepts, y_true = batch
         
         # Full forward pass
         y_pred, c_pred, c_logits = self(x)
         
-        # Task loss
+        # Task loss (using loss class like CREAM - handles shapes automatically)
+        task_loss = self.task_loss_function(y_pred, y_true)
+        
         if self.num_classes == 1:
-            task_loss = F.binary_cross_entropy_with_logits(y_pred.squeeze(), y_true.float())
-            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+            task_preds = (torch.sigmoid(y_pred) > 0.5).int()
             task_acc = (task_preds == y_true).float().mean()
         else:
-            task_loss = F.cross_entropy(y_pred, y_true)
             task_preds = y_pred.argmax(dim=1)
             task_acc = (task_preds == y_true).float().mean()
         
-        # Concept loss (use logits for BCEWithLogitsLoss)
-        concept_loss = F.binary_cross_entropy_with_logits(
-            c_logits,
-            true_concepts.float()
-        )
+        # Concept loss (using loss class like CREAM)
+        concept_loss = self.concept_loss_function(c_logits, true_concepts.float())
         concept_acc = ((c_pred > 0.5) == true_concepts).float().mean()
         
         # Base loss
