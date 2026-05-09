@@ -29,10 +29,12 @@ from src.mcream_model import mCREAM_UtoC_Y, mCREAM_Full
 from src.expert_graphs.generation import (
     load_expert_graphs,
     generate_expert_graphs_from_dag,
+    generate_structured_experts,
     save_expert_graphs,
     load_and_split_dag,
     compute_edge_statistics,
     DISAGREEMENT_LEVELS,
+    EXPERT_BIAS_TYPES,
 )
 from src.expert_graphs.aggregation import create_aggregation_module
 
@@ -69,21 +71,39 @@ def load_or_generate_expert_graphs(
         multi_expert_config = config.get("multi_expert", {})
         num_experts = multi_expert_config.get("num_experts", 5)
         disagreement_level = multi_expert_config.get("disagreement_level", "medium")
+        expert_types = multi_expert_config.get("expert_types", None)
         
-        params = DISAGREEMENT_LEVELS[disagreement_level]
-        
-        expert_u2c, expert_c2y, u2c_star, c2y_star = generate_expert_graphs_from_dag(
-            dag_path=config["paths"]["DAG_file"],
-            num_classes=config["hyperparameters_model2"]["num_classes"],
-            num_experts=num_experts,
-            p_del=params["p_del"],
-            p_add=params["p_add"],
-            p_rev=params["p_rev"],
-            base_seed=config.get("seed", 42),
-        )
-        
-        # Save for future use
-        if expert_dir:
+        # Use structured experts if expert_types is specified
+        if expert_types:
+            print(f"  Using structured expert types: {expert_types}")
+            expert_u2c, expert_c2y, u2c_star, c2y_star = generate_structured_experts(
+                dag_path=config["paths"]["DAG_file"],
+                num_classes=config["hyperparameters_model2"]["num_classes"],
+                expert_types=expert_types,
+                base_seed=config.get("seed", 42),
+            )
+            num_experts = len(expert_types)
+            save_config = {
+                "dag_path": str(config["paths"]["DAG_file"]),
+                "num_classes": config["hyperparameters_model2"]["num_classes"],
+                "num_experts": num_experts,
+                "expert_types": expert_types,
+                "seed": config.get("seed", 42),
+            }
+        else:
+            # Use uniform disagreement level
+            params = DISAGREEMENT_LEVELS[disagreement_level]
+            print(f"  Using disagreement level '{disagreement_level}': {params}")
+            
+            expert_u2c, expert_c2y, u2c_star, c2y_star = generate_expert_graphs_from_dag(
+                dag_path=config["paths"]["DAG_file"],
+                num_classes=config["hyperparameters_model2"]["num_classes"],
+                num_experts=num_experts,
+                p_del=params["p_del"],
+                p_add=params["p_add"],
+                p_rev=params["p_rev"],
+                base_seed=config.get("seed", 42),
+            )
             save_config = {
                 "dag_path": str(config["paths"]["DAG_file"]),
                 "num_classes": config["hyperparameters_model2"]["num_classes"],
