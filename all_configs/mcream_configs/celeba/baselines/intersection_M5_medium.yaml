@@ -54,3 +54,5 @@ hyperparameters:
 trainer_param:
   max_epochs: 200
   gradient_clip_val: null
+
+experiment_name: intersection_M5_medium

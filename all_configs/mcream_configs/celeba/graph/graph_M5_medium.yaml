@@ -1,5 +1,5 @@
-# mCREAM - Union Baseline (M=5, Medium Disagreement) - CelebA
-# Method: Union of all expert graphs (most inclusive)
+# mCREAM - Graph-level Attention (M=5, Medium Disagreement) - CelebA
+# Method: Learn per-expert weight π, output = Σ π_m * A^(m)
 
 mode: train_cbm
 seed: 42
@@ -26,23 +26,23 @@ multi_expert:
   enabled: true
   num_experts: 5
   disagreement_level: medium
-  aggregation_type: union           # BASELINE: Union of all experts
+  aggregation_type: graph           # LEARNABLE: per-expert weights
   graph_regularization:
-    prior_weight: 0.0               # No regularization for baseline
-    sparsity_weight: 0.0
+    prior_weight: 0.1
+    sparsity_weight: 0.01
     acyclicity_weight: 0.0
 
 # =============================================================================
 # Model Hyperparameters (CREAM-compatible for CelebA)
 # =============================================================================
 hyperparameters_model2:
-  num_classes: 1                    # Binary classification (Smiling)
-  num_concepts: 7                   # 7 facial attribute concepts
-  num_exogenous: 75                 # 70 (Uc) + 5 (Uy)
+  num_classes: 1
+  num_concepts: 7
+  num_exogenous: 75
   num_side_channel: 5
   concept_representation: soft
   num_hidden_layers_in_maskedmlp: 0
-  previous_model_output_size: 512   # CelebA backbone output
+  previous_model_output_size: 512
   side_dropout: true
   dropout_prob: 0.1
 
@@ -55,4 +55,4 @@ trainer_param:
   max_epochs: 200
   gradient_clip_val: null
 
-experiment_name: union_M5_medium
+experiment_name: graph_M5_medium
