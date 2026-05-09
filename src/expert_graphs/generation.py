@@ -40,13 +40,24 @@ def load_and_split_dag(
         u2c_graph: Concept-to-concept adjacency [K x K] where K = num_concepts
         c2y_graph: Task adjacency [T x (K+T)] where T = num_classes
     """
+    import numpy as np
+    
     df = pd.read_csv(dag_path, index_col=0)
     
-    # Convert to boolean tensor (handles 'True'/'False' strings)
-    full_graph = torch.tensor(
-        df.values == True if df.values.dtype == bool else df.values == 'True',
-        dtype=torch.bool
-    )
+    # Convert to boolean tensor - handle various formats
+    values = df.values
+    
+    # Check if already boolean (handles numpy.bool_)
+    if np.issubdtype(values.dtype, np.bool_):
+        bool_values = values
+    elif values.dtype == object:
+        # String values - could be 'True'/'False' or 'true'/'false'
+        bool_values = (values == True) | (values == 'True') | (values == 'true') | (values == '1')
+    else:
+        # Numeric - treat non-zero as True
+        bool_values = values != 0
+    
+    full_graph = torch.tensor(bool_values, dtype=torch.bool)
     
     # CREAM's exact splitting logic (from src/models.py lines 816-817):
     # self.u2c_graph = self.causal_graph[:-self.num_classes, :-self.num_classes]
