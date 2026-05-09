@@ -29,4 +29,4 @@ hyperparameters:
   lambda_weight: 1
   frozen_model1: true
 trainer_param:
-  max_epochs: 200
+  max_epochs: 20

@@ -52,7 +52,7 @@ hyperparameters:
   frozen_model1: true
 
 trainer_param:
-  max_epochs: 200
+  max_epochs: 20
   gradient_clip_val: null
 
 experiment_name: intersection_M5_medium
