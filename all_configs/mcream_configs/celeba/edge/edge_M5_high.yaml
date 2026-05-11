@@ -1,0 +1,58 @@
+# mCREAM - Edge-level Reliability Learning (M=5, High Disagreement) - CelebA
+# Method: Learn per-edge reliability α, output = sigmoid(α)
+
+mode: train_cbm
+seed: 42
+dataset_name: CelebA
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+
+backbone_model: Standard_CelebA
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/final_DAG_unfair.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+  expert_graphs_dir: ./data/CelebA/expert_graphs/M5/high/
+
+# =============================================================================
+# mCREAM Settings
+# =============================================================================
+multi_expert:
+  enabled: true
+  num_experts: 5
+  disagreement_level: high
+  aggregation_type: edge            # LEARNABLE: per-edge reliability
+  graph_regularization:
+    prior_weight: 0.1               # Keep close to expert consensus
+    sparsity_weight: 0.01           # Encourage sparse graph
+    acyclicity_weight: 0.0
+
+# =============================================================================
+# Model Hyperparameters (CREAM-compatible for CelebA)
+# =============================================================================
+hyperparameters_model2:
+  num_classes: 1
+  num_concepts: 7
+  num_exogenous: 75
+  num_side_channel: 5
+  concept_representation: soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  side_dropout: true
+  dropout_prob: 0.1
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 20
+  gradient_clip_val: null
+
+experiment_name: edge_M5_high
