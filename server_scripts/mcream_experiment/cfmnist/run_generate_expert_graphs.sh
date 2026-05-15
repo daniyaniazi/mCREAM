@@ -46,6 +46,14 @@ echo "HOST=$(hostname)"
     --disagreement_level high \
     --output_dir data/FashionMNIST/expert_graphs/M5/high
 
+# M5/structured_bias
+"$PYTHON_BIN" generate_expert_graphs.py \
+    --dag_path data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv \
+    --num_classes 10 \
+    --num_experts 5 \
+    --disagreement_level structured_bias \
+    --output_dir data/FashionMNIST/expert_graphs/M5/structured_bias
+
 # M2/medium (for ablation)
 "$PYTHON_BIN" generate_expert_graphs.py \
     --dag_path data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv \
@@ -61,6 +69,12 @@ echo "HOST=$(hostname)"
     --num_experts 10 \
     --disagreement_level medium \
     --output_dir data/FashionMNIST/expert_graphs/M10/medium
+
+echo ""
+echo "=== Generating CREAM noisy DAGs from expert_0 ==="
+for LEVEL in low medium high structured_bias; do
+    "$PYTHON_BIN" generate_single_noisy_dags.py --dataset cfmnist --level "$LEVEL"
+done
 
 echo ""
 echo "=============================================="

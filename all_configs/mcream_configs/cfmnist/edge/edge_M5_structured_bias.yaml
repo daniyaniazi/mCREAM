@@ -5,6 +5,7 @@
 
 mode: train_cbm
 seed: 42
+seeds: [42, 7, 1, 134, 89]
 dataset_name: Complete_Concept_FMNIST
 
 dataset_params:
