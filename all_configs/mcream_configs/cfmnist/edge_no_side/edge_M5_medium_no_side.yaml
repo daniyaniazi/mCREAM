@@ -1,0 +1,52 @@
+# mCREAM - Edge-level Reliability (M=5, Medium) - cfmnist - NO SIDE CHANNEL
+
+mode: train_cbm
+seed: 42
+dataset_name: Complete_Concept_FMNIST
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: true
+  return_images: true
+
+backbone_model: Standard_FashionMNIST
+
+multi_expert:
+  enabled: true
+  num_experts: 5
+  disagreement_level: medium
+  aggregation_type: edge
+  graph_regularization:
+    prior_weight: 0.1
+    sparsity_weight: 0.01
+    acyclicity_weight: 0.0
+
+hyperparameters_model2:
+  num_classes: 10
+  num_concepts: 11
+  num_exogenous: 22
+  num_side_channel: 0
+  concept_representation: group_soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 128
+  side_dropout: true
+  dropout_prob: 0.8
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 50
+
+experiment_name: edge_M5_medium_no_side
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv
+  expert_graphs_dir: ./data/FashionMNIST/expert_graphs/M5/medium/
+  input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
+  softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
