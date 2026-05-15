@@ -275,20 +275,14 @@ def evaluate_learned_graphs(
     return results
 
 
-def main(config_path: str):
-    """Main training function."""
-    
-    # Load config
-    config = load_config(config_path)
-    config_path = Path(config_path)
+def run_single_seed(config: dict, config_path: Path, seed: int):
+    """Run a single mCREAM experiment with a given seed. Returns results dict."""
     
     print(f"\n{'='*60}")
-    print(f"mCREAM Training")
+    print(f"mCREAM Training  |  seed={seed}")
     print(f"Config: {config_path}")
     print(f"{'='*60}\n")
     
-    # Set seed
-    seed = config.get("seed", 42)
     pl.seed_everything(seed, workers=True)
     
     # Load dataset
@@ -342,7 +336,8 @@ def main(config_path: str):
         / dataset_name
         / config["mode"]
         / "mCREAM"
-        / experiment_name         # union_M5_medium, intersection_M5_medium, edge_M5_medium, etc.
+        / experiment_name
+        / f"seed_{seed}"
     )
     
     trainer = pl.Trainer(
@@ -367,7 +362,7 @@ def main(config_path: str):
     trainer.test(model, datamodule=dataset)
     test_time = time.time() - test_start
     
-    # Get metrics
+    # Get metrics (includes val_* and test_* from trainer)
     val_train_metrics = {
         key: value.item() for key, value in trainer.callback_metrics.items()
     }
@@ -381,7 +376,6 @@ def main(config_path: str):
     
     print("\nSaving intermediate values for analysis...")
     
-    # Save train set intermediate values
     train_latent = save_intermediate_values(
         dataset=dataset,
         dataset_name=dataset_name,
@@ -392,7 +386,6 @@ def main(config_path: str):
         save_directory=pl_checkpoint_path,
     )
     
-    # Save test set intermediate values
     test_latent = save_intermediate_values(
         dataset=dataset,
         dataset_name=dataset_name,
@@ -427,11 +420,11 @@ def main(config_path: str):
         "max_epochs": max_epochs,
         "seed": seed,
         "experiment_name": config_path.stem,
-        "train_val_time": training_time / 60.0,  # minutes (same name as CREAM)
-        "test_time": test_time / 60.0,           # minutes (same name as CREAM)
+        "train_val_time": training_time / 60.0,
+        "test_time": test_time / 60.0,
         "num_trainable_parameters": num_params,
         
-        # === Core metrics (from trainer) ===
+        # === Core metrics (from trainer — includes val_* and test_*) ===
         **val_train_metrics,
         
         # === mCREAM-specific fields ===
@@ -443,20 +436,168 @@ def main(config_path: str):
         **graph_metrics,
     }
     
-    # Save results to version-specific directory (alongside lightning logs)
+    # =========================================================================
+    # PFI (Permutation Feature Importance) — same as CREAM
+    # =========================================================================
+    num_concepts = config["hyperparameters_model2"]["num_concepts"]
+    num_side = config["hyperparameters_model2"]["num_side_channel"]
+    
+    if num_side > 0:
+        from src.PFI_accuracy import PFI_accuracies
+        
+        print("\nComputing PFI importances...")
+        concept_dropped_score, side_dropped_score = PFI_accuracies(
+            model.u_to_CY.last_layer, test_latent[0], num_concepts, repeat=100
+        )
+        PFI_concept_importance = results["test_task_accuracy"] - concept_dropped_score
+        PFI_side_importance = results["test_task_accuracy"] - side_dropped_score
+        print(f"  PFI concept importance: {PFI_concept_importance}")
+        print(f"  PFI side importance: {PFI_side_importance}")
+        results["PFI_concept_importance"] = PFI_concept_importance
+        results["PFI_side_importance"] = PFI_side_importance
+        
+        # =================================================================
+        # SAGE / CCI (Concept Completeness Index) — same as CREAM
+        # =================================================================
+        print("\nComputing SAGE / CCI...")
+        try:
+            import sage
+            from torch import nn
+            from src.sage_importance_functions import (
+                prepare_shap_data,
+                group_importance_metric,
+            )
+            from src.diff_permutation_estimator import (
+                PermutationEstimator as my_PermutationEstimator,
+            )
+            from src.utils import timeout
+            
+            workers = config.get("dataset_params", {}).get("num_workers", 4)
+            batch_size = config.get("dataset_params", {}).get("batch_size", 128)
+            
+            @timeout(3600)
+            def run_sage(train_latent, test_latent, config, results):
+                sage_df_train = train_latent[1]
+                sage_df_test = test_latent[1]
+                
+                train_x, _, train_group_names, train_groups = prepare_shap_data(sage_df_train)
+                train_x = train_x.to_numpy()
+                
+                test_x, test_y, test_group_names, test_groups = prepare_shap_data(sage_df_test)
+                test_x = test_x.to_numpy()
+                test_y = test_y.to_numpy()
+                
+                assert train_group_names == test_group_names and train_groups == test_groups
+                
+                num_classes = config["hyperparameters_model2"]["num_classes"]
+                if num_classes == 1:
+                    explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Sigmoid())
+                else:
+                    explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Softmax(dim=1))
+                
+                twenty_pct = int(len(sage_df_train) * 0.2)
+                imputer = sage.GroupedMarginalImputer(
+                    explained_model, train_x[:twenty_pct], test_groups
+                )
+                estimator = my_PermutationEstimator(
+                    imputer, "cross entropy", random_state=seed, n_jobs=workers
+                )
+                sage_values = estimator(test_x, test_y, batch_size=batch_size, thresh=0.05, bar=False)
+                
+                explanation_values = dict(zip(test_group_names, sage_values.values))
+                cci = group_importance_metric(explanation_values)
+                print(f"  CCI: {cci}")
+                
+                results["CCI"] = cci
+                results["debugging_sage_metrics_concepts"] = explanation_values["concepts"]
+                results["debugging_sage_metrics_side_channel"] = explanation_values["side_channel"]
+                return results
+            
+            results = run_sage(train_latent, test_latent, config, results)
+        except Exception as e:
+            print(f"  SAGE/CCI failed: {e}")
+            results["CCI"] = None
+            results["debugging_sage_metrics_concepts"] = None
+            results["debugging_sage_metrics_side_channel"] = None
+    
+    # Save results to version-specific directory
     pl_checkpoint_path = Path(trainer.logger.log_dir)
-    results_csv_path = pl_checkpoint_path / f"{experiment_name}_results.csv"
     
     print(f"\nSaving results to version folder: {pl_checkpoint_path}")
     dict_to_csv(results, pl_checkpoint_path, config_path)
     
-    # Also save to central metrics directory for easy comparison
+    # Also save to central metrics directory
     metrics_dir = Path(config["paths"]["default_root_dir"]) / "metrics" / dataset_name / "mCREAM"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     dict_to_csv(results, metrics_dir, config_path)
     
     print(f"Results also saved to: {metrics_dir}")
     print(f"{'='*60}\n")
+    
+    return results
+
+
+def main(config_path: str):
+    """Main training function with multi-seed support."""
+    import numpy as np
+    import pandas as pd
+    
+    config = load_config(config_path)
+    config_path = Path(config_path)
+    
+    # Multi-seed support: config can specify seeds as list or single int
+    seeds = config.get("seeds", None)
+    if seeds is None:
+        seeds = [config.get("seed", 42)]
+    
+    print(f"\n{'#'*60}")
+    print(f"mCREAM Multi-Seed Run  |  seeds={seeds}")
+    print(f"{'#'*60}\n")
+    
+    all_results = []
+    for i, seed in enumerate(seeds):
+        print(f"\n>>> Seed {i+1}/{len(seeds)}: {seed}")
+        # Override the seed in config for this run
+        run_config = {**config, "seed": seed}
+        result = run_single_seed(run_config, config_path, seed)
+        all_results.append(result)
+    
+    # If multiple seeds, compute and save summary (mean ± std)
+    if len(seeds) > 1:
+        print(f"\n{'#'*60}")
+        print(f"MULTI-SEED SUMMARY ({len(seeds)} seeds)")
+        print(f"{'#'*60}")
+        
+        df = pd.DataFrame(all_results)
+        
+        # Identify numeric columns for aggregation
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Exclude seed and max_epochs from aggregation
+        agg_cols = [c for c in numeric_cols if c not in ("seed", "max_epochs", "num_experts", "num_trainable_parameters")]
+        
+        summary = {"experiment_name": config_path.stem, "num_seeds": len(seeds), "seeds": str(seeds)}
+        for col in agg_cols:
+            vals = df[col].dropna()
+            if len(vals) > 0:
+                summary[f"{col}_mean"] = vals.mean()
+                summary[f"{col}_std"] = vals.std()
+                print(f"  {col}: {vals.mean():.4f} ± {vals.std():.4f}")
+        
+        # Save per-seed CSV and summary CSV
+        dataset_name = config["dataset_name"]
+        metrics_dir = Path(config["paths"]["default_root_dir"]) / "metrics" / dataset_name / "mCREAM"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        
+        per_seed_path = metrics_dir / f"{config_path.stem}_per_seed.csv"
+        df.to_csv(per_seed_path, index=False)
+        print(f"\nPer-seed results: {per_seed_path}")
+        
+        summary_df = pd.DataFrame([summary])
+        summary_path = metrics_dir / f"{config_path.stem}_summary.csv"
+        summary_df.to_csv(summary_path, index=False)
+        print(f"Summary results:  {summary_path}")
+        
+        print(f"\n{'#'*60}\n")
 
 
 if __name__ == "__main__":
