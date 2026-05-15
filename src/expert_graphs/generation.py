@@ -198,15 +198,15 @@ def generate_expert_graphs_from_dag(
 # =============================================================================
 
 DISAGREEMENT_LEVELS = {
-    "low": {"p_del": 0.05, "p_add": 0.05, "p_rev": 0.02},
-    "medium": {"p_del": 0.15, "p_add": 0.15, "p_rev": 0.08},
-    "high": {"p_del": 0.40, "p_add": 0.40, "p_rev": 0.20},
+    "low": {"p_del": 0.25, "p_add": 0.25, "p_rev": 0.10},
+    "medium": {"p_del": 0.55, "p_add": 0.55, "p_rev": 0.25},
+    "high": {"p_del": 0.85, "p_add": 0.85, "p_rev": 0.40},
 }
 
 EXPERT_BIAS_TYPES = {
-    "conservative": {"p_del": 0.30, "p_add": 0.05, "p_rev": 0.05},
-    "liberal": {"p_del": 0.05, "p_add": 0.30, "p_rev": 0.05},
-    "balanced": {"p_del": 0.15, "p_add": 0.15, "p_rev": 0.08},
+    "conservative": {"p_del": 0.60, "p_add": 0.10, "p_rev": 0.10},
+    "liberal": {"p_del": 0.10, "p_add": 0.60, "p_rev": 0.10},
+    "balanced": {"p_del": 0.35, "p_add": 0.35, "p_rev": 0.15},
 }
 
 
