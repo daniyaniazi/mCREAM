@@ -45,12 +45,11 @@ echo "HOST=$(hostname)"
     --disagreement_level high \
     --output_dir data/CelebA/expert_graphs/M5/high
 
-# M5/structured_bias
+# M5/structured_bias (uses expert_types instead of disagreement_level)
 "$PYTHON_BIN" generate_expert_graphs.py \
     --dag_path data/CelebA/final_DAG_unfair.csv \
     --num_classes 1 \
-    --num_experts 5 \
-    --disagreement_level structured_bias \
+    --expert_types conservative liberal balanced conservative liberal \
     --output_dir data/CelebA/expert_graphs/M5/structured_bias
 
 echo ""

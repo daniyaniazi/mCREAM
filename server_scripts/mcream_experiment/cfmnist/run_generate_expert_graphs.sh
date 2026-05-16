@@ -46,12 +46,11 @@ echo "HOST=$(hostname)"
     --disagreement_level high \
     --output_dir data/FashionMNIST/expert_graphs/M5/high
 
-# M5/structured_bias
+# M5/structured_bias (uses expert_types instead of disagreement_level)
 "$PYTHON_BIN" generate_expert_graphs.py \
     --dag_path data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv \
     --num_classes 10 \
-    --num_experts 5 \
-    --disagreement_level structured_bias \
+    --expert_types conservative liberal balanced conservative liberal \
     --output_dir data/FashionMNIST/expert_graphs/M5/structured_bias
 
 # M2/medium (for ablation)

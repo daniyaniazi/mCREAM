@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--num_classes", type=int, help="Number of task classes")
     parser.add_argument("--num_experts", type=int, default=5, help="Number of experts")
     parser.add_argument("--disagreement_level", type=str, default="medium",
-                       choices=["low", "medium", "high"],
+                       choices=["low", "medium", "high", "structured_bias"],
                        help="Disagreement level preset")
     parser.add_argument("--expert_types", type=str, nargs="+",
                        help="List of expert types (e.g., conservative liberal balanced)")
