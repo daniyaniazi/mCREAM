@@ -313,6 +313,22 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     print(f"  u2c shape: {expert_u2c[0].shape}")
     print(f"  c2y shape: {expert_c2y[0].shape}")
     
+    # Print per-expert corruption statistics
+    print(f"\n  Per-expert corruption (vs ground truth):")
+    expert_corruption_stats = []
+    for m in range(len(expert_u2c)):
+        diff_u2c = (expert_u2c[m].bool() != u2c_star.bool()).sum().item()
+        diff_c2y = (expert_c2y[m].bool() != c2y_star.bool()).sum().item()
+        total_cells_u2c = u2c_star.numel()
+        total_cells_c2y = c2y_star.numel()
+        pct_u2c = diff_u2c / total_cells_u2c * 100
+        pct_c2y = diff_c2y / total_cells_c2y * 100
+        print(f"    expert_{m}: u2c {diff_u2c}/{total_cells_u2c} ({pct_u2c:.1f}%) changed, c2y {diff_c2y}/{total_cells_c2y} ({pct_c2y:.1f}%) changed")
+        expert_corruption_stats.append({
+            f"expert_{m}_u2c_corruption_pct": pct_u2c,
+            f"expert_{m}_c2y_corruption_pct": pct_c2y,
+        })
+    
     # Load backbone model (x → u)
     print(f"\nLoading backbone model...")
     backbone = load_backbone(config, dataset_name)
@@ -412,6 +428,56 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     print(f"    Recall: {graph_metrics['c2y_recall']:.3f}")
     print(f"    F1: {graph_metrics['c2y_f1']:.3f}")
     
+    # =========================================================================
+    # Save aggregated graph as CSV (same format as ground-truth DAG)
+    # =========================================================================
+    import pandas as pd
+    import numpy as np
+    
+    A_u2c_learned, A_c2y_learned = model.get_learned_graphs()
+    
+    # Read node names from ground-truth DAG
+    gt_dag = pd.read_csv(config["paths"]["DAG_file"], index_col=0)
+    node_names = list(gt_dag.index)
+    K = config["hyperparameters_model2"]["num_concepts"]
+    T = config["hyperparameters_model2"]["num_classes"]
+    
+    # Reconstruct full (K+T) × (K+T) adjacency matrix
+    full_adj = np.zeros((K + T, K + T), dtype=float)
+    
+    # u2c block [K×K] — soft values
+    u2c_np = A_u2c_learned.detach().cpu().numpy()
+    full_adj[:K, :K] = u2c_np[:K, :K]
+    
+    # c2y block [T×(K+T)] — soft values
+    c2y_np = A_c2y_learned.detach().cpu().numpy()
+    full_adj[K:, :] = c2y_np[:T, :K + T]
+    
+    # Save soft (continuous) version
+    soft_dag_df = pd.DataFrame(full_adj, index=node_names, columns=node_names)
+    graph_save_dir = Path(pl_checkpoint_path) / "learned_graphs"
+    graph_save_dir.mkdir(parents=True, exist_ok=True)
+    
+    soft_path = graph_save_dir / "aggregated_dag_soft.csv"
+    soft_dag_df.round(4).to_csv(soft_path)
+    print(f"\n  Saved soft aggregated DAG to: {soft_path}")
+    
+    # Save binary (thresholded at 0.5) version
+    binary_adj = (full_adj > 0.5).astype(bool)
+    binary_dag_df = pd.DataFrame(binary_adj, index=node_names, columns=node_names)
+    binary_path = graph_save_dir / "aggregated_dag_binary.csv"
+    binary_dag_df.to_csv(binary_path)
+    print(f"  Saved binary aggregated DAG to: {binary_path}")
+    
+    # Also save ground truth for easy side-by-side comparison
+    gt_path = graph_save_dir / "ground_truth_dag.csv"
+    gt_dag.to_csv(gt_path)
+    print(f"  Saved ground truth DAG to: {gt_path}")
+    
+    # Save raw u2c and c2y tensors
+    torch.save(A_u2c_learned.detach().cpu(), graph_save_dir / "learned_u2c.pt")
+    torch.save(A_c2y_learned.detach().cpu(), graph_save_dir / "learned_c2y.pt")
+    
     # Compile results (CREAM-compatible format)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     
@@ -434,6 +500,13 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         
         # === Graph recovery metrics ===
         **graph_metrics,
+        
+        # === Per-expert corruption stats ===
+        **{k: v for d in expert_corruption_stats for k, v in d.items()},
+        
+        # === Learned graph corruption vs GT ===
+        "learned_u2c_corruption_pct": (A_u2c_learned.detach().cpu() > 0.5).bool().ne(u2c_star.bool()).sum().item() / u2c_star.numel() * 100,
+        "learned_c2y_corruption_pct": (A_c2y_learned.detach().cpu() > 0.5).bool().ne(c2y_star.bool()).sum().item() / c2y_star.numel() * 100,
     }
     
     # =========================================================================

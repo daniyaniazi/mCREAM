@@ -127,23 +127,49 @@ def main():
     # Get node names
     concept_names, task_names = get_node_names(dag_path, num_classes)
     
-    # Compute statistics
-    print("\nStatistics:")
+    # Compute per-expert corruption statistics
+    print("\n" + "="*60)
+    print("CORRUPTION STATISTICS")
+    print("="*60)
+    
+    K_u2c = u2c_star.shape[0] * u2c_star.shape[1]
+    K_c2y = c2y_star.shape[0] * c2y_star.shape[1]
+    gt_edges_u2c = u2c_star.bool().sum().item()
+    gt_edges_c2y = c2y_star.bool().sum().item()
+    gt_noedges_u2c = K_u2c - gt_edges_u2c
+    gt_noedges_c2y = K_c2y - gt_edges_c2y
+    
+    print(f"\n  Ground truth u2c: {gt_edges_u2c} edges / {K_u2c} cells ({gt_edges_u2c/K_u2c*100:.1f}% density)")
+    print(f"  Ground truth c2y: {gt_edges_c2y} edges / {K_c2y} cells ({gt_edges_c2y/K_c2y*100:.1f}% density)")
+    
+    print(f"\n  Per-expert corruption (vs ground truth):")
+    print(f"  {'Expert':<10} {'u2c_diff':>10} {'u2c_%':>8} {'u2c_del':>8} {'u2c_add':>8} {'c2y_diff':>10} {'c2y_%':>8} {'c2y_del':>8} {'c2y_add':>8}")
+    print(f"  {'-'*80}")
+    
+    for m in range(len(expert_u2c)):
+        # u2c
+        diff_u2c = (expert_u2c[m].bool() != u2c_star.bool())
+        deleted_u2c = (u2c_star.bool() & ~expert_u2c[m].bool()).sum().item()
+        added_u2c = (~u2c_star.bool() & expert_u2c[m].bool()).sum().item()
+        total_diff_u2c = diff_u2c.sum().item()
+        
+        # c2y
+        diff_c2y = (expert_c2y[m].bool() != c2y_star.bool())
+        deleted_c2y = (c2y_star.bool() & ~expert_c2y[m].bool()).sum().item()
+        added_c2y = (~c2y_star.bool() & expert_c2y[m].bool()).sum().item()
+        total_diff_c2y = diff_c2y.sum().item()
+        
+        print(f"  expert_{m:<4} {total_diff_u2c:>10} {total_diff_u2c/K_u2c*100:>7.1f}% {deleted_u2c:>8} {added_u2c:>8} {total_diff_c2y:>10} {total_diff_c2y/K_c2y*100:>7.1f}% {deleted_c2y:>8} {added_c2y:>8}")
+    
+    # Majority vote statistics
+    print(f"\n  Majority vote (aggregated) vs ground truth:")
     stats_u2c = compute_edge_statistics(expert_u2c, u2c_star)
-    print(f"  u2c graph:")
-    print(f"    Ground truth edges: {stats_u2c['num_edges_gt']}")
-    print(f"    Majority vote edges: {stats_u2c['num_edges_majority']}")
-    print(f"    Precision: {stats_u2c['precision']:.3f}")
-    print(f"    Recall: {stats_u2c['recall']:.3f}")
-    print(f"    F1: {stats_u2c['f1']:.3f}")
+    print(f"    u2c: edges_gt={stats_u2c['num_edges_gt']}, edges_majority={stats_u2c['num_edges_majority']}, P={stats_u2c['precision']:.3f}, R={stats_u2c['recall']:.3f}, F1={stats_u2c['f1']:.3f}")
     
     stats_c2y = compute_edge_statistics(expert_c2y, c2y_star)
-    print(f"  c2y graph:")
-    print(f"    Ground truth edges: {stats_c2y['num_edges_gt']}")
-    print(f"    Majority vote edges: {stats_c2y['num_edges_majority']}")
-    print(f"    Precision: {stats_c2y['precision']:.3f}")
-    print(f"    Recall: {stats_c2y['recall']:.3f}")
-    print(f"    F1: {stats_c2y['f1']:.3f}")
+    print(f"    c2y: edges_gt={stats_c2y['num_edges_gt']}, edges_majority={stats_c2y['num_edges_majority']}, P={stats_c2y['precision']:.3f}, R={stats_c2y['recall']:.3f}, F1={stats_c2y['f1']:.3f}")
+    
+    print("="*60)
     
     # Prepare config for saving
     save_config = {

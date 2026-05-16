@@ -1,0 +1,51 @@
+# mCREAM - majority Baseline (M=5, low) - CelebA - NO SIDE CHANNEL
+
+mode: train_cbm
+seed: 42
+seeds: [42, 7, 1, 134, 89]
+dataset_name: CelebA
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+
+backbone_model: Standard_CelebA
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/final_DAG_unfair.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+  expert_graphs_dir: ./data/CelebA/expert_graphs/M5/low/
+
+multi_expert:
+  enabled: true
+  num_experts: 5
+  disagreement_level: low
+  aggregation_type: majority
+  graph_regularization:
+    prior_weight: 0.0
+    sparsity_weight: 0.0
+    acyclicity_weight: 0.0
+
+hyperparameters_model2:
+  num_classes: 1
+  num_concepts: 7
+  num_exogenous: 7
+  num_side_channel: 0
+  concept_representation: soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  side_dropout: true
+  dropout_prob: 0.8
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 0.75
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 50
+
+experiment_name: majority_M5_low_no_side
