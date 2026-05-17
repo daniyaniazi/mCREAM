@@ -747,11 +747,71 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     
     # =========================================================================
     # Concept Leakage Check (CREAM Table 4 equivalent)
-    # =========================================================================
+    # Train C_true→Y baseline in-situ (same dataset split, same seed)
     # Λ = max(ACC_f - ACC_optimal, 0)
-    # ACC_optimal comes from C_true→Y baseline (must be known beforehand)
-    # We just save test_task_accuracy; leakage is computed post-hoc
-    # For no-side-channel configs, check if test_task_accuracy > C_true→Y ceiling
+    # =========================================================================
+    print("\nTraining C_true→Y baseline for leakage check...")
+    K = config["hyperparameters_model2"]["num_concepts"]
+    T = config["hyperparameters_model2"]["num_classes"]
+    
+    # Simple linear model: ground truth concepts → task label
+    c2y_baseline = torch.nn.Linear(K, T)
+    if torch.cuda.is_available():
+        c2y_baseline = c2y_baseline.cuda()
+    
+    c2y_optimizer = torch.optim.Adam(c2y_baseline.parameters(), lr=0.001)
+    
+    # Train on training set
+    dataset.setup(stage="fit")
+    train_loader = dataset.train_dataloader()
+    c2y_baseline.train()
+    for epoch in range(50):  # 50 epochs is plenty for a linear model
+        for batch in train_loader:
+            _, true_concepts, y_true = batch
+            if torch.cuda.is_available():
+                true_concepts = true_concepts.cuda().float()
+                y_true = y_true.cuda()
+            
+            y_pred = c2y_baseline(true_concepts)
+            if T == 1:
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    y_pred.squeeze(), y_true.float()
+                )
+            else:
+                loss = torch.nn.functional.cross_entropy(y_pred, y_true)
+            
+            c2y_optimizer.zero_grad()
+            loss.backward()
+            c2y_optimizer.step()
+    
+    # Evaluate on test set
+    c2y_baseline.eval()
+    dataset.setup(stage="test")
+    test_loader = dataset.test_dataloader()
+    all_correct = []
+    with torch.no_grad():
+        for batch in test_loader:
+            _, true_concepts, y_true = batch
+            if torch.cuda.is_available():
+                true_concepts = true_concepts.cuda().float()
+                y_true = y_true.cuda()
+            
+            y_pred = c2y_baseline(true_concepts)
+            if T == 1:
+                preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+            else:
+                preds = y_pred.argmax(dim=1)
+            all_correct.append((preds == y_true).float())
+    
+    c2y_baseline_acc = torch.cat(all_correct).mean().item()
+    print(f"  C_true→Y baseline accuracy (ACC_optimal): {c2y_baseline_acc:.4f}")
+    
+    # Compute leakage: Λ = max(ACC_f - ACC_optimal, 0)
+    # ACC_f = model's test task accuracy (from no-side runs, this is the full model without shortcuts)
+    acc_f = val_train_metrics.get("test_task_accuracy", 0.0)
+    leakage = max(acc_f - c2y_baseline_acc, 0.0)
+    print(f"  Model test accuracy (ACC_f): {acc_f:.4f}")
+    print(f"  Concept leakage (Λ): {leakage:.4f}")
     
     # Compile results (CREAM-compatible format)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -780,6 +840,8 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         "disconnected_weights": disconnected_weights,
         "peak_gpu_memory_mb": peak_gpu_memory_mb,
         "test_dropout_task_accuracy": dropout_test_acc,
+        "c2y_baseline_accuracy": c2y_baseline_acc,
+        "concept_leakage": leakage,
         
         # === Benchmark results (CREAM's run_benchmark) ===
         **benchmark_results,
