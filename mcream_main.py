@@ -63,11 +63,6 @@ def load_or_generate_expert_graphs(
             num_classes = config["hyperparameters_model2"]["num_classes"]
             u2c_star, c2y_star = load_and_split_dag(config["paths"]["DAG_file"], num_classes)
         
-        # Move ground truth to GPU if available (avoid device mismatch later)
-        if torch.cuda.is_available():
-            u2c_star = u2c_star.cuda()
-            c2y_star = c2y_star.cuda()
-        
         return expert_u2c, expert_c2y, u2c_star, c2y_star
     
     else:
@@ -333,6 +328,11 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
             f"expert_{m}_u2c_corruption_pct": pct_u2c,
             f"expert_{m}_c2y_corruption_pct": pct_c2y,
         })
+    
+    # Move ground truth to GPU for later comparisons with learned graphs
+    if torch.cuda.is_available():
+        u2c_star = u2c_star.cuda()
+        c2y_star = c2y_star.cuda()
     
     # Load backbone model (x → u)
     print(f"\nLoading backbone model...")
