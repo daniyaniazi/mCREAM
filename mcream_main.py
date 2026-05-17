@@ -885,9 +885,24 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     if num_side > 0:
         from src.PFI_accuracy import PFI_accuracies
         
+        # Wrap SoftMaskedLinear so it can be called as model(x) without mask arg.
+        # PFI and SAGE expect a standard nn.Module. We bake in the learned c2y mask.
+        A_c2y_for_wrap = model.u_to_CY.graph_agg_c2y().detach()
+        c2y_mask_frozen = model.u_to_CY._build_c2y_mask(A_c2y_for_wrap)
+        
+        class LastLayerWithMask(torch.nn.Module):
+            def __init__(self, soft_masked_linear, mask):
+                super().__init__()
+                self.layer = soft_masked_linear
+                self.mask = mask
+            def forward(self, x):
+                return self.layer(x, self.mask)
+        
+        last_layer_wrapped = LastLayerWithMask(model.u_to_CY.last_layer, c2y_mask_frozen)
+        
         print("\nComputing PFI importances...")
         concept_dropped_score, side_dropped_score = PFI_accuracies(
-            model.u_to_CY.last_layer, test_latent[0], num_concepts, repeat=100
+            last_layer_wrapped, test_latent[0], num_concepts, repeat=100
         )
         PFI_concept_importance = results["test_task_accuracy"] - concept_dropped_score
         PFI_side_importance = results["test_task_accuracy"] - side_dropped_score
@@ -928,9 +943,9 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
             
             num_classes = config["hyperparameters_model2"]["num_classes"]
             if num_classes == 1:
-                explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Sigmoid())
+                explained_model = nn.Sequential(last_layer_wrapped, nn.Sigmoid())
             else:
-                explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Softmax(dim=1))
+                explained_model = nn.Sequential(last_layer_wrapped, nn.Softmax(dim=1))
             
             twenty_pct = int(len(sage_df_train) * 0.2)
             imputer = sage.GroupedMarginalImputer(
