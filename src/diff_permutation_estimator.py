@@ -35,6 +35,7 @@ class PermutationEstimator:
         max_coalition=1.0,
         verbose=False,
         bar=True,
+        max_time=None,
     ):
         """
         Estimate SAGE values.
@@ -51,6 +52,9 @@ class PermutationEstimator:
           max_coalition: maximum coalition size (int or float).
           verbose: print progress messages.
           bar: display progress bar.
+          max_time: maximum wall-clock time in seconds. If exceeded, returns
+            partial results from permutations completed so far instead of
+            raising an error.
 
         The default behavior is to detect convergence based on the width of the
         SAGE values' confidence intervals. Convergence is defined by the ratio
@@ -59,6 +63,8 @@ class PermutationEstimator:
 
         Returns: Explanation object.
         """
+        import time
+        start_time = time.time()
         # Set random state.
         self.rng = np.random.default_rng(seed=self.random_state)
 
@@ -143,6 +149,19 @@ class PermutationEstimator:
                         print("Detected convergence")
 
                     # Skip bar ahead.
+                    if bar:
+                        bar.n = bar.total
+                        bar.refresh()
+                    break
+
+            # Check for time limit.
+            if max_time is not None:
+                elapsed = time.time() - start_time
+                if elapsed > max_time:
+                    if verbose or True:  # Always print time limit message
+                        print(f"SAGE time limit reached ({elapsed:.0f}s > {max_time}s). "
+                              f"Returning partial results after {it+1} iterations. "
+                              f"StdDev Ratio = {ratio:.4f}")
                     if bar:
                         bar.n = bar.total
                         bar.refresh()

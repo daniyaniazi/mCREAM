@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils import get_component_with_dicts, load_config, dict_to_csv
-from src.mcream_model import mCREAM_UtoC_Y, mCREAM_Full
+from src.mcream_model import mCREAM_UtoC_Y, mCREAM_Full, SoftMaskedLinear
 from src.expert_graphs.generation import (
     load_expert_graphs,
     generate_expert_graphs_from_dag,
@@ -363,20 +363,38 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         enable_progress_bar=True,
     )
     
+    # Track GPU memory
+    peak_gpu_memory_mb = 0.0
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    
     # Train
     print(f"\nTraining for {max_epochs} epochs...")
-    start_time = time.time()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
     
     trainer.fit(model, datamodule=dataset)
     
-    training_time = time.time() - start_time
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    training_time = time.perf_counter() - start_time
     print(f"Training completed in {training_time/60:.2f} minutes")
     
     # Test
     print("\nTesting...")
-    test_start = time.time()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    test_start = time.perf_counter()
     trainer.test(model, datamodule=dataset)
-    test_time = time.time() - test_start
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    test_time = time.perf_counter() - test_start
+    
+    # Capture peak GPU memory
+    if torch.cuda.is_available():
+        peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        print(f"Peak GPU memory: {peak_gpu_memory_mb:.1f} MB")
     
     # Get metrics (includes val_* and test_* from trainer)
     val_train_metrics = {
@@ -413,6 +431,93 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     )
     
     print(f"  Saved to: {pl_checkpoint_path}")
+    
+    # =========================================================================
+    # Benchmark (CREAM's run_benchmark — CPU/GPU timing & memory)
+    # =========================================================================
+    print("\nRunning benchmark (CPU/GPU timing & memory)...")
+    from src.utils import run_benchmark
+    try:
+        # CREAM's run_benchmark expects model(batch) → (y, c) and uses
+        # model.concept_loss_function / model.task_loss_function for backprop.
+        # mCREAM_Full returns (y, c, c_logits) and has different loss API.
+        # We wrap the model to make it compatible.
+        class BenchmarkWrapper(torch.nn.Module):
+            def __init__(self, mcream_model):
+                super().__init__()
+                self.mcream_model = mcream_model
+                # Expose loss functions that run_benchmark expects
+                self.concept_loss_function = torch.nn.BCEWithLogitsLoss()
+                self.task_loss_function = torch.nn.CrossEntropyLoss()
+            def forward(self, x):
+                y, c, _ = self.mcream_model(x)
+                return y, c
+        
+        benchmark_model = BenchmarkWrapper(model)
+        benchmark_results = run_benchmark(benchmark_model, dataset.test_dataloader())
+        print(f"  GPU time (no backprop): {benchmark_results.get('GPU_time_backprop_False', 'N/A'):.4f}s")
+        print(f"  GPU memory (no backprop): {benchmark_results.get('GPU_memory_backprop_False', 'N/A'):.1f} MB")
+    except Exception as e:
+        print(f"  Benchmark failed: {e}")
+        benchmark_results = {}
+    
+    # =========================================================================
+    # Dropout test accuracy (CREAM's trainer.predict → dropout_test_acc)
+    # Test with side channel fully dropped (p=1.0) to check concept sufficiency
+    # =========================================================================
+    dropout_test_acc = None
+    num_side = config["hyperparameters_model2"]["num_side_channel"]
+    if num_side > 0 and hasattr(model, 'u_to_CY') and model.u_to_CY.side_channel is not None:
+        print("\nTesting with side channel fully dropped (dropout p=1.0)...")
+        try:
+            model.eval()
+            # Find the StochasticDepth layer and set p=1 (drop everything)
+            from torchvision.ops import StochasticDepth
+            original_p = None
+            stoch_layer = None
+            for module in model.u_to_CY.side_channel.modules():
+                if isinstance(module, StochasticDepth):
+                    original_p = module.p
+                    module.p = 1.0  # Drop all side channel
+                    module.train()  # StochasticDepth only drops in train mode
+                    stoch_layer = module
+                    break
+            
+            if stoch_layer is not None:
+                all_preds = []
+                all_labels = []
+                dataset.setup(stage="test")
+                test_loader = dataset.test_dataloader()
+                
+                with torch.no_grad():
+                    for batch in test_loader:
+                        x, true_concepts, y_true = batch
+                        if torch.cuda.is_available():
+                            x = x.cuda()
+                            model = model.cuda()
+                        
+                        y_pred, c_pred, _ = model(x)
+                        
+                        if config["hyperparameters_model2"]["num_classes"] == 1:
+                            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+                        else:
+                            task_preds = y_pred.argmax(dim=1)
+                        
+                        all_preds.append(task_preds.cpu())
+                        all_labels.append(y_true.cpu())
+                
+                all_preds = torch.cat(all_preds)
+                all_labels = torch.cat(all_labels)
+                dropout_test_acc = (all_preds == all_labels).float().mean().item()
+                print(f"  Dropout test accuracy (side fully dropped): {dropout_test_acc:.4f}")
+                
+                # Restore original dropout
+                stoch_layer.p = original_p
+                stoch_layer.eval()
+            else:
+                print("  No StochasticDepth layer found in side channel")
+        except Exception as e:
+            print(f"  Dropout test failed: {e}")
     
     # Evaluate learned graphs
     print("\nEvaluating learned graphs...")
@@ -478,8 +583,190 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
     torch.save(A_u2c_learned.detach().cpu(), graph_save_dir / "learned_u2c.pt")
     torch.save(A_c2y_learned.detach().cpu(), graph_save_dir / "learned_c2y.pt")
     
+    # =========================================================================
+    # Interventions (CREAM Figure 6 equivalent)
+    # =========================================================================
+    print("\nRunning intervention experiment...")
+    
+    # Get activation percentiles for soft intervention values
+    from src.saving_intermediate_utils import save_activation_percentiles
+    
+    concept_rep = config["hyperparameters_model2"].get("concept_representation", "soft")
+    intervention_percentile_df = None
+    if concept_rep in ("soft", "group_soft", "logits"):
+        intervention_percentile_df = save_activation_percentiles(
+            dataset=dataset,
+            dataset_name=dataset_name,
+            model=model,
+            DAG_path=config["paths"]["DAG_file"],
+        )
+    
+    # Determine max interventions (number of concepts, like CREAM)
+    A_c2y_for_direct = A_c2y_learned.detach().cpu()
+    concept_cols = A_c2y_for_direct[:, :K]
+    direct_mask = concept_cols.sum(dim=0) > 0.5
+    num_direct = direct_mask.sum().item()
+    max_interventions = K  # iterate over ALL concepts (like CREAM)
+    print(f"  Direct concepts: {num_direct}, max interventions: {max_interventions}")
+    
+    # Check if propagating interventions are supported for this config
+    can_propagate = (
+        hasattr(model, 'u_to_CY') and 
+        model.u_to_CY.input_per_concept == 1 and
+        isinstance(model.u_to_CY.u2c_model, SoftMaskedLinear)
+    ) if hasattr(model, 'u_to_CY') else (
+        model.input_per_concept == 1 and
+        isinstance(model.u2c_model, SoftMaskedLinear)
+    )
+    
+    # Run interventions for both simple and propagating (if supported)
+    intervention_modes = ["simple"]
+    if can_propagate:
+        intervention_modes.append("propagating")
+        print("  Propagating interventions: ENABLED (input_per_concept=1, depth=0)")
+    else:
+        print("  Propagating interventions: DISABLED (input_per_concept>1 or hidden layers)")
+    
+    all_intervention_results = []
+    
+    for interv_mode in intervention_modes:
+        print(f"\n  Running {interv_mode} interventions...")
+        intervention_results = []
+        intervention_trainer = pl.Trainer(
+            max_epochs=max_epochs,
+            default_root_dir=default_root_dir,
+            enable_progress_bar=False,
+            deterministic=True,
+            logger=False,
+        )
+        
+        for n_interv in range(max_interventions + 1):
+            model.eval()
+            all_task_correct = []
+            all_concept_correct = []
+            
+            dataset.setup(stage="test")
+            test_loader = dataset.test_dataloader()
+            
+            with torch.no_grad():
+                for batch in test_loader:
+                    x, true_concepts, y_true = batch
+                    if torch.cuda.is_available():
+                        x = x.cuda()
+                        true_concepts = true_concepts.cuda()
+                        y_true = y_true.cuda()
+                        model = model.cuda()
+                    
+                    # Convert hard interventions to soft if needed
+                    interv_concepts = true_concepts.clone()
+                    if intervention_percentile_df is not None and concept_rep in ("soft", "group_soft", "logits"):
+                        percentiles_5th = torch.tensor(
+                            intervention_percentile_df["5th_percentile"].values,
+                            device=x.device, dtype=x.dtype
+                        )
+                        percentiles_95th = torch.tensor(
+                            intervention_percentile_df["95th_percentile"].values,
+                            device=x.device, dtype=x.dtype
+                        )
+                        interv_concepts = true_concepts.float() * percentiles_95th + (1 - true_concepts.float()) * percentiles_5th
+                    
+                    # Choose intervention method
+                    if interv_mode == "propagating":
+                        y_pred, c_pred, _ = model.forward_with_propagating_interventions(
+                            x, interv_concepts, num_interventions=n_interv
+                        )
+                    else:
+                        y_pred, c_pred, _ = model.forward_with_interventions(
+                            x, interv_concepts, num_interventions=n_interv
+                        )
+                    
+                    # Task accuracy
+                    if config["hyperparameters_model2"]["num_classes"] == 1:
+                        task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+                        all_task_correct.append((task_preds == y_true).float())
+                    else:
+                        task_preds = y_pred.argmax(dim=1)
+                        all_task_correct.append((task_preds == y_true).float())
+                    
+                    # Concept accuracy
+                    all_concept_correct.append(((c_pred > 0.5) == true_concepts).float().mean(dim=1))
+            
+            task_acc = torch.cat(all_task_correct).mean().item()
+            concept_acc = torch.cat(all_concept_correct).mean().item()
+            
+            intervention_results.append({
+                "mode": interv_mode,
+                "num_interventions": n_interv,
+                "test_task_accuracy": task_acc,
+                "test_concept_accuracy": concept_acc,
+            })
+            print(f"    [{interv_mode}] interventions={n_interv}: task_acc={task_acc:.4f}, concept_acc={concept_acc:.4f}")
+        
+        all_intervention_results.extend(intervention_results)
+    
+    # Save all intervention results as CSV
+    interv_df = pd.DataFrame(all_intervention_results)
+    interv_path = Path(pl_checkpoint_path) / "intervention_results.csv"
+    interv_df.to_csv(interv_path, index=False)
+    print(f"  Saved intervention results to: {interv_path}")
+    
+    # =========================================================================
+    # Exogenous Correlation Matrix (CREAM Figure 7/15 equivalent)
+    # =========================================================================
+    print("\nComputing exogenous correlation matrix...")
+    
+    all_exogenous = []
+    model.eval()
+    dataset.setup(stage="test")
+    with torch.no_grad():
+        for batch in dataset.test_dataloader():
+            x = batch[0]
+            if torch.cuda.is_available():
+                x = x.cuda()
+                model = model.cuda()
+            # Get exogenous variables (after backbone + splitter)
+            u_features = model.x_to_u.concept_extractor(x)
+            u_split = model.u_to_CY.u2u_model(u_features)
+            all_exogenous.append(u_split.cpu())
+    
+    all_exogenous = torch.cat(all_exogenous, dim=0)  # [N, num_exogenous]
+    corr_matrix = torch.corrcoef(all_exogenous.T).numpy()  # [num_exo, num_exo]
+    
+    # Save correlation matrix
+    corr_save_dir = Path(pl_checkpoint_path) / "correlation_analysis"
+    corr_save_dir.mkdir(parents=True, exist_ok=True)
+    
+    corr_df = pd.DataFrame(corr_matrix)
+    corr_df.to_csv(corr_save_dir / "exogenous_correlation_matrix.csv")
+    
+    # Save absolute correlation as heatmap-ready CSV with concept labels
+    abs_corr = np.abs(corr_matrix)
+    abs_corr_df = pd.DataFrame(abs_corr)
+    abs_corr_df.to_csv(corr_save_dir / "exogenous_abs_correlation_matrix.csv")
+    print(f"  Saved correlation matrices to: {corr_save_dir}")
+    
+    # =========================================================================
+    # Concept Leakage Check (CREAM Table 4 equivalent)
+    # =========================================================================
+    # Λ = max(ACC_f - ACC_optimal, 0)
+    # ACC_optimal comes from C_true→Y baseline (must be known beforehand)
+    # We just save test_task_accuracy; leakage is computed post-hoc
+    # For no-side-channel configs, check if test_task_accuracy > C_true→Y ceiling
+    
     # Compile results (CREAM-compatible format)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # Count soft-masked params (mCREAM equivalent of CREAM's count_maskedmlp_params)
+    # In CREAM, disconnected weights (mask=0) are subtracted from param count.
+    # In mCREAM, we count weights where the soft mask < 0.5 (effectively disconnected).
+    disconnected_weights = 0
+    A_u2c_for_mask = model.u_to_CY.graph_agg_u2c().detach()
+    A_c2y_for_mask = model.u_to_CY.graph_agg_c2y().detach()
+    mask_u2c = model.u_to_CY._build_u2c_mask(A_u2c_for_mask)
+    mask_c2y = model.u_to_CY._build_c2y_mask(A_c2y_for_mask)
+    disconnected_weights += (mask_u2c < 0.5).sum().item()  # u2c layer
+    disconnected_weights += (mask_c2y < 0.5).sum().item()  # c2y layer
+    effective_params = num_params - disconnected_weights
     
     results = {
         # === CREAM-compatible fields ===
@@ -489,6 +776,13 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         "train_val_time": training_time / 60.0,
         "test_time": test_time / 60.0,
         "num_trainable_parameters": num_params,
+        "num_effective_parameters": effective_params,
+        "disconnected_weights": disconnected_weights,
+        "peak_gpu_memory_mb": peak_gpu_memory_mb,
+        "test_dropout_task_accuracy": dropout_test_acc,
+        
+        # === Benchmark results (CREAM's run_benchmark) ===
+        **benchmark_results,
         
         # === Core metrics (from trainer — includes val_* and test_*) ===
         **val_train_metrics,
@@ -507,6 +801,12 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         # === Learned graph corruption vs GT ===
         "learned_u2c_corruption_pct": (A_u2c_learned.detach().cpu() > 0.5).bool().ne(u2c_star.bool()).sum().item() / u2c_star.numel() * 100,
         "learned_c2y_corruption_pct": (A_c2y_learned.detach().cpu() > 0.5).bool().ne(c2y_star.bool()).sum().item() / c2y_star.numel() * 100,
+        
+        # === Intervention results (from simple mode) ===
+        "num_direct_concepts": num_direct,
+        "intervention_acc_0": next((r["test_task_accuracy"] for r in all_intervention_results if r["mode"] == "simple" and r["num_interventions"] == 0), None),
+        "intervention_acc_max": next((r["test_task_accuracy"] for r in all_intervention_results if r["mode"] == "simple" and r["num_interventions"] == max_interventions), None),
+        "propagating_intervention_acc_max": next((r["test_task_accuracy"] for r in all_intervention_results if r["mode"] == "propagating" and r["num_interventions"] == max_interventions), None),
     }
     
     # =========================================================================
@@ -543,50 +843,48 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
             from src.diff_permutation_estimator import (
                 PermutationEstimator as my_PermutationEstimator,
             )
-            from src.utils import timeout
             
             workers = config.get("dataset_params", {}).get("num_workers", 4)
             batch_size = config.get("dataset_params", {}).get("batch_size", 128)
             
-            @timeout(3600)
-            def run_sage(train_latent, test_latent, config, results):
-                sage_df_train = train_latent[1]
-                sage_df_test = test_latent[1]
-                
-                train_x, _, train_group_names, train_groups = prepare_shap_data(sage_df_train)
-                train_x = train_x.to_numpy()
-                
-                test_x, test_y, test_group_names, test_groups = prepare_shap_data(sage_df_test)
-                test_x = test_x.to_numpy()
-                test_y = test_y.to_numpy()
-                
-                assert train_group_names == test_group_names and train_groups == test_groups
-                
-                num_classes = config["hyperparameters_model2"]["num_classes"]
-                if num_classes == 1:
-                    explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Sigmoid())
-                else:
-                    explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Softmax(dim=1))
-                
-                twenty_pct = int(len(sage_df_train) * 0.2)
-                imputer = sage.GroupedMarginalImputer(
-                    explained_model, train_x[:twenty_pct], test_groups
-                )
-                estimator = my_PermutationEstimator(
-                    imputer, "cross entropy", random_state=seed, n_jobs=workers
-                )
-                sage_values = estimator(test_x, test_y, batch_size=batch_size, thresh=0.05, bar=False)
-                
-                explanation_values = dict(zip(test_group_names, sage_values.values))
-                cci = group_importance_metric(explanation_values)
-                print(f"  CCI: {cci}")
-                
-                results["CCI"] = cci
-                results["debugging_sage_metrics_concepts"] = explanation_values["concepts"]
-                results["debugging_sage_metrics_side_channel"] = explanation_values["side_channel"]
-                return results
+            sage_df_train = train_latent[1]
+            sage_df_test = test_latent[1]
             
-            results = run_sage(train_latent, test_latent, config, results)
+            train_x, _, train_group_names, train_groups = prepare_shap_data(sage_df_train)
+            train_x = train_x.to_numpy()
+            
+            test_x, test_y, test_group_names, test_groups = prepare_shap_data(sage_df_test)
+            test_x = test_x.to_numpy()
+            test_y = test_y.to_numpy()
+            
+            assert train_group_names == test_group_names and train_groups == test_groups
+            
+            num_classes = config["hyperparameters_model2"]["num_classes"]
+            if num_classes == 1:
+                explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Sigmoid())
+            else:
+                explained_model = nn.Sequential(model.u_to_CY.last_layer, nn.Softmax(dim=1))
+            
+            twenty_pct = int(len(sage_df_train) * 0.2)
+            imputer = sage.GroupedMarginalImputer(
+                explained_model, train_x[:twenty_pct], test_groups
+            )
+            estimator = my_PermutationEstimator(
+                imputer, "cross entropy", random_state=seed, n_jobs=workers
+            )
+            # max_time=3600: if not converged within 1 hour, return partial results
+            sage_values = estimator(
+                test_x, test_y, batch_size=batch_size, thresh=0.05,
+                bar=False, max_time=3600
+            )
+            
+            explanation_values = dict(zip(test_group_names, sage_values.values))
+            cci = group_importance_metric(explanation_values)
+            print(f"  CCI: {cci}")
+            
+            results["CCI"] = cci
+            results["debugging_sage_metrics_concepts"] = explanation_values["concepts"]
+            results["debugging_sage_metrics_side_channel"] = explanation_values["side_channel"]
         except Exception as e:
             print(f"  SAGE/CCI failed: {e}")
             results["CCI"] = None

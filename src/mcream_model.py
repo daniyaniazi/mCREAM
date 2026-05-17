@@ -543,6 +543,337 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         r_c2y = self.graph_agg_c2y.get_edge_reliabilities() if hasattr(self.graph_agg_c2y, 'get_edge_reliabilities') else None
         return r_u2c, r_c2y
 
+    def _split_into_in_direct_concepts(self) -> Tuple[List[int], List[int]]:
+        """
+        Split concepts into indirect and direct based on learned c2y graph.
+        
+        Mirrors CREAM's UtoY_model._split_into_in_direct_concepts.
+        Direct concepts: have at least one edge to a task class in A_c2y.
+        Indirect concepts: no edges to any task class.
+        
+        Returns:
+            (indirect_indices, direct_indices)
+        """
+        A_c2y = self.graph_agg_c2y().detach()
+        concept_cols = A_c2y[:, :self.num_concepts]  # [T, K]
+        # Threshold at 0.5 to determine edge presence (soft → binary)
+        has_task_edge = (concept_cols > 0.5).any(dim=0)  # [K]
+        
+        direct_indices = torch.where(has_task_edge)[0].tolist()
+        indirect_indices = [i for i in range(self.num_concepts) if i not in direct_indices]
+        
+        # Fallback: if no direct concepts found, treat all as direct
+        if not direct_indices:
+            direct_indices = list(range(self.num_concepts))
+            indirect_indices = []
+        
+        return indirect_indices, direct_indices
+    
+    def _generate_intervention_mask_direct_first(
+        self, num_interventions: int, batch_size: int, device: torch.device
+    ) -> Tensor:
+        """
+        Generate intervention mask prioritizing DIRECT concepts first.
+        Mirrors CREAM's UtoY_model.generate_intervention_mask.
+        Used for simple (non-propagating) interventions.
+        """
+        import random
+        indirect_indices, direct_indices = self._split_into_in_direct_concepts()
+        
+        batch_masks = []
+        for _ in range(batch_size):
+            m = torch.zeros(self.num_concepts, dtype=torch.bool, device=device)
+            # Direct first
+            n_direct = min(num_interventions, len(direct_indices))
+            selected = random.sample(direct_indices, n_direct)
+            # Then indirect if needed
+            if num_interventions > n_direct and indirect_indices:
+                n_extra = min(num_interventions - n_direct, len(indirect_indices))
+                selected += random.sample(indirect_indices, n_extra)
+            m[selected] = True
+            batch_masks.append(m)
+        return torch.stack(batch_masks)
+    
+    def _generate_intervention_mask_indirect_first(
+        self, num_interventions: int, batch_size: int, device: torch.device
+    ) -> Tensor:
+        """
+        Generate intervention mask prioritizing INDIRECT concepts first.
+        Mirrors CREAM's UtoY_model_propagating_interventions.generate_intervention_mask.
+        Used for propagating interventions (indirect corrections cascade to dependents).
+        """
+        import random
+        indirect_indices, direct_indices = self._split_into_in_direct_concepts()
+        
+        batch_masks = []
+        for _ in range(batch_size):
+            m = torch.zeros(self.num_concepts, dtype=torch.bool, device=device)
+            # Indirect first (propagation makes these more valuable)
+            n_indirect = min(num_interventions, len(indirect_indices))
+            selected = random.sample(indirect_indices, n_indirect)
+            # Then direct if needed
+            if num_interventions > n_indirect and direct_indices:
+                n_extra = min(num_interventions - n_indirect, len(direct_indices))
+                selected += random.sample(direct_indices, n_extra)
+            m[selected] = True
+            batch_masks.append(m)
+        return torch.stack(batch_masks)
+
+    def forward_with_interventions(
+        self,
+        x: Tensor,
+        true_concepts: Tensor,
+        num_interventions: int = 1,
+        intervention_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Simple (non-propagating) forward pass with concept interventions.
+        Replaces predicted concepts with ground-truth values, then predicts task.
+        
+        Mirrors CREAM's UtoY_model.forward_with_interventions (simple swap,
+        prioritizes direct concepts).
+
+        Args:
+            x: Input features from backbone [batch, previous_model_output_size]
+            true_concepts: Ground-truth concept values [batch, num_concepts]
+            num_interventions: Number of concepts to intervene on
+            intervention_mask: Optional boolean mask [batch, num_concepts]
+
+        Returns:
+            y: Task logits
+            c: Concept activations (after intervention)
+            c_logits: Concept logits (before intervention)
+        """
+        # Get soft adjacency matrices
+        A_soft_u2c = self.graph_agg_u2c()
+        A_soft_c2y = self.graph_agg_c2y()
+
+        mask_u2c = self._build_u2c_mask(A_soft_u2c)
+        mask_c2y = self._build_c2y_mask(A_soft_c2y)
+
+        # 1. Split representation
+        u = self.u2u_model(x)
+        Uc = u[:, :self.num_exogenous - self.num_side_channel]
+        Uy = u[:, self.num_exogenous - self.num_side_channel:]
+
+        # 2. Predict concepts
+        c_logits = self.u2c_model(Uc, mask_u2c)
+        c = self.concept_activation_function(c_logits)
+        c_predicted = c.clone()
+
+        # 3. Generate intervention mask if not given (direct concepts first)
+        if intervention_mask is None and num_interventions > 0:
+            intervention_mask = self._generate_intervention_mask_direct_first(
+                num_interventions, c.size(0), c.device
+            )
+
+        # 4. Apply interventions (simple swap)
+        if intervention_mask is not None and num_interventions > 0:
+            c_predicted[intervention_mask] = true_concepts[intervention_mask].type(c_predicted.dtype)
+        c = c_predicted
+
+        # 5. Side channel
+        if self.side_channel is not None:
+            s = self.side_channel(Uy)
+            last_input = torch.cat([c, s], dim=1)
+        else:
+            last_input = c
+
+        # 6. Predict task
+        y = self.last_layer(last_input, mask_c2y)
+
+        return y, c, c_logits
+
+    def forward_with_propagating_interventions(
+        self,
+        x: Tensor,
+        true_concepts: Tensor,
+        num_interventions: int = 1,
+        intervention_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Propagating forward pass with concept interventions.
+        
+        Mirrors CREAM's UtoY_model_propagating_interventions.forward_with_interventions.
+        
+        When concept A is intervened on:
+        1. Invert the SoftMaskedLinear to find what Uc_A should have been
+        2. Re-run u2c_model with corrected Uc to propagate to downstream concepts
+        3. Re-apply interventions on propagated predictions
+        
+        This propagation matters because the u2c mask encodes concept→concept edges:
+        if concept A influences concept B through the learned graph, correcting A's
+        exogenous input allows B to be re-predicted more accurately.
+        
+        Requires: input_per_concept == 1 and u2c_model is SoftMaskedLinear (depth 0).
+        Prioritizes INDIRECT concepts (their corrections cascade to direct ones).
+        
+        Args:
+            x: Input features from backbone [batch, previous_model_output_size]
+            true_concepts: Ground-truth concept values [batch, num_concepts]
+            num_interventions: Number of concepts to intervene on
+            intervention_mask: Optional boolean mask [batch, num_concepts]
+
+        Returns:
+            y: Task logits
+            c: Concept activations (after intervention + propagation)
+            c_logits: Concept logits (before intervention)
+        """
+        assert self.input_per_concept == 1, (
+            f"Propagating interventions require input_per_concept == 1, "
+            f"got {self.input_per_concept}. Use forward_with_interventions instead."
+        )
+        assert isinstance(self.u2c_model, SoftMaskedLinear), (
+            "Propagating interventions require u2c_model to be SoftMaskedLinear "
+            "(num_hidden_layers == 0). Use forward_with_interventions instead."
+        )
+
+        # Get soft adjacency matrices
+        A_soft_u2c = self.graph_agg_u2c()
+        A_soft_c2y = self.graph_agg_c2y()
+
+        # CRITICAL: Threshold the soft mask to binary for propagation.
+        # In CREAM, the mask is boolean — edges either exist (1) or don't (0).
+        # Propagation should only happen through edges the model believes exist.
+        # A soft value of 0.03 on a non-edge would cause spurious propagation.
+        # So we binarize at 0.5: "more likely than not" = edge exists.
+        A_binary_u2c = (A_soft_u2c > 0.5).float()
+        A_binary_c2y = (A_soft_c2y > 0.5).float()
+
+        mask_u2c = self._build_u2c_mask(A_binary_u2c)
+        mask_c2y = self._build_c2y_mask(A_binary_c2y)
+
+        # 1. Split representation
+        u = self.u2u_model(x)
+        Uc = u[:, :self.num_exogenous - self.num_side_channel]
+        Uy = u[:, self.num_exogenous - self.num_side_channel:]
+
+        # Clone Uc for inversion — will modify intervened dimensions
+        Uc_intervened = Uc.clone()
+
+        # 2. Predict concepts (initial, before propagation)
+        c_logits = self.u2c_model(Uc, mask_u2c)
+        logits_before_softmax = c_logits.clone()
+        c = self.concept_activation_function(c_logits)
+        c_predicted = c.clone()
+
+        # 3. Generate intervention mask if not given (indirect concepts first)
+        if intervention_mask is None and num_interventions > 0:
+            intervention_mask = self._generate_intervention_mask_indirect_first(
+                num_interventions, c.size(0), c.device
+            )
+
+        # 4. Apply interventions at concept level (before propagation)
+        if intervention_mask is not None and num_interventions > 0:
+            c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
+                c_predicted.dtype
+            )
+
+        # 5. Propagate: invert SoftMaskedLinear to find corrected Uc values,
+        #    then re-run u2c_model so downstream concepts get updated.
+        #
+        #    With input_per_concept=1 and SoftMaskedLinear:
+        #      c_logit_i = sum_j(weight[i,j] * mask[i,j] * Uc[j]) + bias[i]
+        #      => effective_weight = weight * mask  (element-wise)
+        #
+        #    To invert for Uc_i given desired logit:
+        #      Uc_i = (desired_logit_i - bias_i - sum_{j≠i}(ew[i,j]*Uc[j])) / ew[i,i]
+        if intervention_mask is not None and num_interventions > 0:
+            with torch.no_grad():
+                # Effective weights after soft masking
+                effective_weight = self.u2c_model.weight * mask_u2c  # [K, K]
+                bias = self.u2c_model.bias  # [K]
+
+                # Get (batch_idx, concept_idx) pairs for all interventions
+                batch_idxs, concept_idxs = intervention_mask.nonzero(as_tuple=True)
+
+                for b_idx, c_idx in zip(batch_idxs, concept_idxs):
+                    c_i = c_idx.item()
+
+                    # Compute desired logit for this concept
+                    # For softmax groups: use clamped invert_softmax (like CREAM)
+                    if (self.mutually_exclusive_concepts is not None and
+                            self.concept_representation in ("group_soft", "group_hard")):
+                        # Find which mutex group this concept belongs to
+                        mutex_group = None
+                        idx_in_group = None
+                        for group in self.mutually_exclusive_concepts:
+                            if c_i in group:
+                                mutex_group = group
+                                idx_in_group = group.index(c_i)
+                                break
+                        
+                        if mutex_group is not None:
+                            # Invert softmax: find logit that produces desired activation
+                            group_logits = logits_before_softmax[b_idx, mutex_group]
+                            target_activation = true_concepts[b_idx, c_idx]
+                            eps = torch.finfo(target_activation.dtype).eps
+                            target_activation = torch.clamp(target_activation, min=eps, max=1 - eps)
+                            
+                            # log(p_i / (1 - p_i)) + logsumexp(logits_j≠i)
+                            logits_without = torch.cat([
+                                group_logits[:idx_in_group],
+                                group_logits[idx_in_group + 1:]
+                            ])
+                            log_sum_others = torch.logsumexp(logits_without, dim=0)
+                            desired_logit = (
+                                torch.log(target_activation / (1 - target_activation))
+                                + log_sum_others
+                            )
+                            # Clamp (ReLU-compatible), like CREAM's clamped_invert_softmax
+                            desired_logit = torch.clamp(desired_logit, min=0)
+                        else:
+                            # Concept not in any mutex group — use sigmoid inversion
+                            target_activation = true_concepts[b_idx, c_idx]
+                            eps = torch.finfo(target_activation.dtype).eps
+                            target_activation = torch.clamp(target_activation, min=eps, max=1 - eps)
+                            desired_logit = torch.log(target_activation / (1 - target_activation))
+                    else:
+                        # Sigmoid concepts: logit = log(p / (1-p))
+                        target_activation = true_concepts[b_idx, c_idx]
+                        eps = torch.finfo(target_activation.dtype).eps
+                        target_activation = torch.clamp(target_activation, min=eps, max=1 - eps)
+                        desired_logit = torch.log(target_activation / (1 - target_activation))
+
+                    # Invert the SoftMaskedLinear for this concept:
+                    # desired_logit = ew[i,:] @ Uc + bias[i]
+                    # => Uc[i] = (desired_logit - bias[i] - sum_{j≠i}(ew[i,j]*Uc[j])) / ew[i,i]
+                    ew_i = effective_weight[c_i]  # [K]
+                    other_contribution = (
+                        ew_i @ Uc_intervened[b_idx] - ew_i[c_i] * Uc_intervened[b_idx, c_i]
+                    )
+                    ew_diag = ew_i[c_i]
+                    
+                    if ew_diag.abs() > 1e-6:  # Avoid division by ~zero
+                        Uc_intervened[b_idx, c_i] = torch.clamp(
+                            (desired_logit - bias[c_i] - other_contribution) / ew_diag,
+                            min=0  # ReLU: exogenous values are non-negative
+                        )
+
+                # 6. Re-run u2c_model with corrected Uc to propagate
+                c_logits_propagated = self.u2c_model(Uc_intervened, mask_u2c)
+                c_propagated = self.concept_activation_function(c_logits_propagated)
+
+                # 7. Re-apply interventions on propagated concepts (fail-safe)
+                c_predicted = c_propagated.clone()
+                c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
+                    c_predicted.dtype
+                )
+
+        c = c_predicted
+
+        # 8. Side channel
+        if self.side_channel is not None:
+            s = self.side_channel(Uy)
+            last_input = torch.cat([c, s], dim=1)
+        else:
+            last_input = c
+
+        # 9. Predict task
+        y = self.last_layer(last_input, mask_c2y)
+
+        return y, c, c_logits
+
 
 # =============================================================================
 # Full mCREAM Model (with backbone) - Similar to Template_CBM_MultiClass
@@ -708,3 +1039,38 @@ class mCREAM_Full(pl.LightningModule):
     
     def get_edge_reliabilities(self) -> Tuple[Optional[Tensor], Optional[Tensor]]:
         return self.u_to_CY.get_edge_reliabilities()
+
+    def forward_with_interventions(
+        self,
+        x: Tensor,
+        true_concepts: Tensor,
+        num_interventions: int = 1,
+        intervention_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Simple (non-propagating) forward pass with interventions.
+        Mirrors CREAM's UtoY_model.forward_with_interventions.
+        """
+        u = self.x_to_u.concept_extractor(x)
+        y, c, c_logits = self.u_to_CY.forward_with_interventions(
+            u, true_concepts, num_interventions, intervention_mask
+        )
+        return y, c, c_logits
+
+    def forward_with_propagating_interventions(
+        self,
+        x: Tensor,
+        true_concepts: Tensor,
+        num_interventions: int = 1,
+        intervention_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Propagating forward pass with interventions.
+        Mirrors CREAM's UtoY_model_propagating_interventions.forward_with_interventions.
+        Requires input_per_concept == 1 and num_hidden_layers == 0.
+        """
+        u = self.x_to_u.concept_extractor(x)
+        y, c, c_logits = self.u_to_CY.forward_with_propagating_interventions(
+            u, true_concepts, num_interventions, intervention_mask
+        )
+        return y, c, c_logits
