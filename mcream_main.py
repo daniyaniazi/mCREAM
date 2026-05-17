@@ -63,6 +63,11 @@ def load_or_generate_expert_graphs(
             num_classes = config["hyperparameters_model2"]["num_classes"]
             u2c_star, c2y_star = load_and_split_dag(config["paths"]["DAG_file"], num_classes)
         
+        # Move ground truth to GPU if available (avoid device mismatch later)
+        if torch.cuda.is_available():
+            u2c_star = u2c_star.cuda()
+            c2y_star = c2y_star.cuda()
+        
         return expert_u2c, expert_c2y, u2c_star, c2y_star
     
     else:
@@ -602,7 +607,7 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         )
     
     # Determine max interventions (number of concepts, like CREAM)
-    A_c2y_for_direct = A_c2y_learned.detach().cpu()
+    A_c2y_for_direct = A_c2y_learned.detach()
     concept_cols = A_c2y_for_direct[:, :K]
     direct_mask = concept_cols.sum(dim=0) > 0.5
     num_direct = direct_mask.sum().item()
@@ -861,8 +866,8 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
         **{k: v for d in expert_corruption_stats for k, v in d.items()},
         
         # === Learned graph corruption vs GT ===
-        "learned_u2c_corruption_pct": (A_u2c_learned.detach().cpu() > 0.5).bool().ne(u2c_star.bool()).sum().item() / u2c_star.numel() * 100,
-        "learned_c2y_corruption_pct": (A_c2y_learned.detach().cpu() > 0.5).bool().ne(c2y_star.bool()).sum().item() / c2y_star.numel() * 100,
+        "learned_u2c_corruption_pct": (A_u2c_learned.detach() > 0.5).bool().ne(u2c_star.bool()).sum().item() / u2c_star.numel() * 100,
+        "learned_c2y_corruption_pct": (A_c2y_learned.detach() > 0.5).bool().ne(c2y_star.bool()).sum().item() / c2y_star.numel() * 100,
         
         # === Intervention results (from simple mode) ===
         "num_direct_concepts": num_direct,
