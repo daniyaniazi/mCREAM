@@ -504,12 +504,12 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
                         y_pred, c_pred, _ = model(x)
                         
                         if config["hyperparameters_model2"]["num_classes"] == 1:
-                            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+                            task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
                         else:
                             task_preds = y_pred.argmax(dim=1)
                         
                         all_preds.append(task_preds.cpu())
-                        all_labels.append(y_true.cpu())
+                        all_labels.append(y_true.view(-1).cpu())
                 
                 all_preds = torch.cat(all_preds)
                 all_labels = torch.cat(all_labels)
@@ -687,11 +687,11 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
                     
                     # Task accuracy
                     if config["hyperparameters_model2"]["num_classes"] == 1:
-                        task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
-                        all_task_correct.append((task_preds == y_true).float())
+                        task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
+                        all_task_correct.append((task_preds == y_true.view(-1)).float())
                     else:
                         task_preds = y_pred.argmax(dim=1)
-                        all_task_correct.append((task_preds == y_true).float())
+                        all_task_correct.append((task_preds == y_true.view(-1)).float())
                     
                     # Concept accuracy
                     all_concept_correct.append(((c_pred > 0.5) == true_concepts).float().mean(dim=1))
@@ -780,7 +780,7 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
             y_pred = c2y_baseline(true_concepts)
             if T == 1:
                 loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                    y_pred.squeeze(), y_true.float()
+                    y_pred.view(-1), y_true.float().view(-1)
                 )
             else:
                 loss = torch.nn.functional.cross_entropy(y_pred, y_true)
@@ -803,10 +803,10 @@ def run_single_seed(config: dict, config_path: Path, seed: int):
             
             y_pred = c2y_baseline(true_concepts)
             if T == 1:
-                preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+                preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
             else:
                 preds = y_pred.argmax(dim=1)
-            all_correct.append((preds == y_true).float())
+            all_correct.append((preds == y_true.view(-1)).float())
     
     c2y_baseline_acc = torch.cat(all_correct).mean().item()
     print(f"  C_true→Y baseline accuracy (ACC_optimal): {c2y_baseline_acc:.4f}")
