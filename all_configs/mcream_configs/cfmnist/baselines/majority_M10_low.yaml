@@ -1,5 +1,5 @@
 # mCREAM - Majority Baseline (M=10, Low)
-# Majority vote — keep edges that >50% of experts include
+# Majority vote â€” keep edges that >50% of experts include
 
 mode: train_cbm
 seed: 42
