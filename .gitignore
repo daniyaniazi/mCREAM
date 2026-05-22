@@ -7,10 +7,10 @@ __pycache__/
 *.pyo
 
 server_scripts/data/
-experiments/
+experiments*/
 data/
 
 pretrained_models/
-logs/
+logs*/
 Miniconda*.sh
 .env
