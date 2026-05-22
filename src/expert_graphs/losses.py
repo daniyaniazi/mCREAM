@@ -42,6 +42,38 @@ def prior_consistency_loss(
     return F.mse_loss(alpha_soft, vote_score)
 
 
+def confidence_loss(
+    alpha: Tensor,
+    use_sigmoid: bool = True,
+) -> Tensor:
+    """
+    Encourage decisive edges: push sigmoid(α) toward 0 or 1.
+    
+    L_conf = -mean(|sigmoid(α) - 0.5|)
+    
+    This is the OPPOSITE of prior loss: instead of anchoring to the vote,
+    it encourages the model to make confident decisions about each edge.
+    Edges at 0.5 are penalized (undecided), edges near 0 or 1 are rewarded.
+    
+    Alternative interpretation: minimize binary entropy H(p) = -p*log(p) - (1-p)*log(1-p)
+    
+    Args:
+        alpha: Edge reliability logits [n_rows, n_cols]
+        use_sigmoid: If True, apply sigmoid to alpha
+    
+    Returns:
+        Scalar loss value (lower = more confident edges)
+    """
+    if use_sigmoid:
+        p = torch.sigmoid(alpha)
+    else:
+        p = alpha
+    
+    # Binary entropy: minimum at p=0 or p=1, maximum at p=0.5
+    entropy = -(p * torch.log(p + 1e-8) + (1 - p) * torch.log(1 - p + 1e-8))
+    return entropy.mean()
+
+
 def sparsity_loss(
     alpha: Tensor,
     use_sigmoid: bool = True,
@@ -154,7 +186,7 @@ class GraphRegularizationLoss(nn.Module):
     """
     Combined graph regularization loss module.
     
-    L_graph = β * L_prior + γ * L_sparse + δ * L_acyclic + ε * L_entropy
+    L_graph = β * L_prior + γ * L_sparse + δ * L_acyclic + ε * L_entropy + ζ * L_confidence
     
     Designed to work with EdgeReliabilityModule, GraphAttentionModule,
     or CombinedReliabilityModule.
@@ -162,18 +194,20 @@ class GraphRegularizationLoss(nn.Module):
     
     def __init__(
         self,
-        prior_weight: float = 0.1,
-        sparsity_weight: float = 0.01,
+        prior_weight: float = 0.01,
+        sparsity_weight: float = 0.001,
         acyclicity_weight: float = 0.0,
         entropy_weight: float = 0.0,
-        sparsity_type: str = "sum",  # 'sum' or 'l1'
+        confidence_weight: float = 0.05,
+        sparsity_type: str = "l1",  # 'sum' or 'l1'
     ):
         """
         Args:
-            prior_weight: Weight for prior consistency loss (β)
-            sparsity_weight: Weight for sparsity loss (γ)
+            prior_weight: Weight for prior consistency loss (β) — LOW to not anchor to vote
+            sparsity_weight: Weight for sparsity loss (γ) — LOW to not kill recall
             acyclicity_weight: Weight for acyclicity loss (δ)
             entropy_weight: Weight for entropy regularization (ε)
+            confidence_weight: Weight for confidence loss (ζ) — push edges to 0 or 1
             sparsity_type: 'sum' or 'l1'
         """
         super().__init__()
@@ -181,6 +215,7 @@ class GraphRegularizationLoss(nn.Module):
         self.sparsity_weight = sparsity_weight
         self.acyclicity_weight = acyclicity_weight
         self.entropy_weight = entropy_weight
+        self.confidence_weight = confidence_weight
         self.sparsity_type = sparsity_type
     
     def forward(
@@ -233,6 +268,16 @@ class GraphRegularizationLoss(nn.Module):
                 if pi is not None:
                     loss_entropy = entropy_regularization(pi)
                     total_loss = total_loss + self.entropy_weight * loss_entropy
+        
+        # Confidence loss: push edges to 0 or 1 (decisive)
+        if self.confidence_weight > 0:
+            if hasattr(aggregation_module, 'alpha'):
+                loss_conf = confidence_loss(aggregation_module.alpha)
+                total_loss = total_loss + self.confidence_weight * loss_conf
+            elif A_soft is not None:
+                # For graph attention module, apply to output directly
+                loss_conf = confidence_loss(A_soft, use_sigmoid=False)
+                total_loss = total_loss + self.confidence_weight * loss_conf
         
         return total_loss
     

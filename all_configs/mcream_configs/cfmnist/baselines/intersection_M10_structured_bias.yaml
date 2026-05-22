@@ -18,6 +18,7 @@ multi_expert:
   enabled: true
   num_experts: 10
   disagreement_level: structured_bias
+  expert_types: ['conservative', 'liberal', 'balanced', 'conservative', 'liberal', 'conservative', 'liberal', 'balanced', 'conservative', 'liberal']
   aggregation_type: intersection
   graph_regularization:
     prior_weight: 0.0

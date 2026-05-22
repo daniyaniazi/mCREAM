@@ -138,9 +138,14 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         aggregation_type: str = "edge",  # 'edge', 'graph', 'combined', 'union', etc.
         
         # Graph regularization
-        prior_weight: float = 0.1,
-        sparsity_weight: float = 0.01,
+        prior_weight: float = 0.01,
+        sparsity_weight: float = 0.001,
         acyclicity_weight: float = 0.0,
+        confidence_weight: float = 0.05,
+        
+        # Graph learning schedule
+        graph_lr: float = 0.01,          # 10× higher LR for graph params
+        graph_warmup_epochs: int = 5,    # Freeze graph for first N epochs
         
         # CREAM parameters (same as UtoY_model)
         num_exogenous: int = 76,
@@ -178,6 +183,11 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         self.prior_weight = prior_weight
         self.sparsity_weight = sparsity_weight
         self.acyclicity_weight = acyclicity_weight
+        self.confidence_weight = confidence_weight
+        
+        # Graph learning schedule
+        self.graph_lr = graph_lr
+        self.graph_warmup_epochs = graph_warmup_epochs
         
         # =====================================================================
         # Graph Aggregation Modules (NEW in mCREAM)
@@ -194,6 +204,7 @@ class mCREAM_UtoC_Y(pl.LightningModule):
             prior_weight=prior_weight,
             sparsity_weight=sparsity_weight,
             acyclicity_weight=acyclicity_weight,
+            confidence_weight=confidence_weight,
         )
         
         # =====================================================================
@@ -521,7 +532,40 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        # Separate graph params from network params for different LRs
+        graph_params = []
+        network_params = []
+        
+        graph_module_names = {'graph_agg_u2c', 'graph_agg_c2y'}
+        for name, param in self.named_parameters():
+            if any(gm in name for gm in graph_module_names):
+                graph_params.append(param)
+            else:
+                network_params.append(param)
+        
+        if graph_params:
+            optimizer = torch.optim.Adam([
+                {'params': network_params, 'lr': self.learning_rate},
+                {'params': graph_params, 'lr': self.graph_lr},
+            ])
+        else:
+            # Baseline methods have no learnable graph params
+            optimizer = torch.optim.Adam(network_params, lr=self.learning_rate)
+        
+        return optimizer
+    
+    def on_train_epoch_start(self):
+        """Implement graph warmup: freeze graph params for first N epochs."""
+        if self.current_epoch < self.graph_warmup_epochs:
+            # Freeze graph params during warmup
+            for name, param in self.named_parameters():
+                if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
+                    param.requires_grad = False
+        elif self.current_epoch == self.graph_warmup_epochs:
+            # Unfreeze graph params after warmup
+            for name, param in self.named_parameters():
+                if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
+                    param.requires_grad = True
     
     # =========================================================================
     # Logging and Analysis Methods
