@@ -27,9 +27,14 @@ Create venv once:
 
 ```bash
 cd ~/mCREAM
-python3 -m venv .venv
-source .venv/bin/activate
-#  .venv\Scripts\Activate.ps1
+# python3 -m venv .venv
+# source .venv/bin/activate
+# #  .venv\Scripts\Activate.ps1
+(mcream) slot1_3@loki.hpc.uni-saarland.de$ source /home/dani00003/miniconda3/etc/profile.d/conda.sh
+(mcream) slot1_3@loki.hpc.uni-saarland.de$ conda activate mcream
+python -m pip install ipykernel
+python -m ipykernel install --user --name mcream-conda --display-name "mcream conda"
+
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
