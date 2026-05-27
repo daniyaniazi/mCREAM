@@ -176,9 +176,14 @@ def create_mcream_model(
         aggregation_type=multi_expert.get("aggregation_type", "edge"),
         
         # Graph regularization
-        prior_weight=multi_expert.get("graph_regularization", {}).get("prior_weight", 0.1),
-        sparsity_weight=multi_expert.get("graph_regularization", {}).get("sparsity_weight", 0.01),
+        prior_weight=multi_expert.get("graph_regularization", {}).get("prior_weight", 0.01),
+        sparsity_weight=multi_expert.get("graph_regularization", {}).get("sparsity_weight", 0.001),
         acyclicity_weight=multi_expert.get("graph_regularization", {}).get("acyclicity_weight", 0.0),
+        confidence_weight=multi_expert.get("graph_regularization", {}).get("confidence_weight", 0.05),
+        
+        # Graph learning schedule
+        graph_lr=multi_expert.get("graph_lr", 0.01),
+        graph_warmup_epochs=multi_expert.get("graph_warmup_epochs", 5),
         
         # CREAM parameters
         num_exogenous=hparams["num_exogenous"],

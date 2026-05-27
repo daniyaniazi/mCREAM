@@ -109,11 +109,13 @@ class EdgeReliabilityModule(nn.Module):
     Learns a reliability parameter α_ij for each possible edge.
     Output: Ã = sigmoid(α)
     
-    Initialization: α is set so that sigmoid(α) ≈ expert vote score
+    Initialization: Agreement-weighted — edges with high expert agreement
+    start with amplified confidence (further from 0.5), while disputed edges
+    start closer to the decision boundary.
     
     How learning happens:
     - Forward: ŷ = f(ĉ, Ã) where Ã = sigmoid(α)
-    - Loss: L = CrossEntropy(ŷ, y)
+    - Loss: L = CrossEntropy(ŷ, y) + confidence_loss
     - Backward: ∂L/∂α → update α
     - If edge helps prediction → α increases → edge stronger
     - If edge hurts prediction → α decreases → edge weaker
@@ -124,12 +126,15 @@ class EdgeReliabilityModule(nn.Module):
         expert_graphs: List[Tensor],
         init_from_vote: bool = True,
         learnable: bool = True,
+        agreement_amplification: float = 2.0,
     ):
         """
         Args:
             expert_graphs: List of M adjacency matrices [n_rows, n_cols]
             init_from_vote: If True, initialize α from expert voting
             learnable: If True, α is learnable; if False, fixed to vote
+            agreement_amplification: Scale factor for high-agreement edges.
+                Higher = more confident initialization on agreed-upon edges.
         """
         super().__init__()
         
@@ -141,9 +146,15 @@ class EdgeReliabilityModule(nn.Module):
         vote_score = stacked.mean(dim=0)  # [n_rows, n_cols]
         
         if init_from_vote:
-            # Initialize α so sigmoid(α) ≈ vote_score
-            # logit(x) = log(x / (1-x))
+            # Agreement-weighted initialization:
+            # High agreement (vote near 0 or 1) → amplified logit (more confident)
+            # Low agreement (vote near 0.5) → logit stays near 0 (uncertain)
             alpha_init = torch.logit(vote_score.clamp(0.01, 0.99))
+            
+            # Amplify: edges with strong agreement get pushed further from 0
+            # agreement = |vote - 0.5| * 2, ranges from 0 (total disagreement) to 1 (unanimous)
+            agreement = (vote_score - 0.5).abs() * 2
+            alpha_init = alpha_init * (1.0 + (agreement_amplification - 1.0) * agreement)
         else:
             # Random initialization
             alpha_init = torch.zeros_like(vote_score)
@@ -153,8 +164,9 @@ class EdgeReliabilityModule(nn.Module):
         else:
             self.register_buffer('alpha', alpha_init)
         
-        # Store vote score for regularization
+        # Store vote score and agreement for regularization
         self.register_buffer('vote_score', vote_score)
+        self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
     
     def forward(self) -> Tensor:
         """Returns soft adjacency matrix Ã = sigmoid(α)."""
@@ -171,52 +183,85 @@ class EdgeReliabilityModule(nn.Module):
 
 class GraphAttentionModule(nn.Module):
     """
-    Graph-level attention (π).
+    Graph-level attention with per-edge expert weighting.
     
-    Learns a weight π_m for each expert.
-    Output: Ã = Σ π_m * A^(m)
+    Instead of learning only M scalar weights (too few parameters),
+    this learns per-edge expert attention: for each edge (i,j), which
+    experts to trust most.
     
-    π is computed via softmax so weights sum to 1.
+    Two levels:
+    1. Global expert weights π_m (soft baseline, M params)
+    2. Per-edge expert attention w_m(i,j) (rich, M×n_rows×n_cols params)
+    
+    Output: Ã[i,j] = Σ_m softmax(π_m + w_m[i,j]) * A^(m)[i,j]
+    
+    This allows the model to trust expert 1 on edge (0,3) but expert 5 on edge (2,7).
     """
     
     def __init__(
         self,
         expert_graphs: List[Tensor],
         init_uniform: bool = True,
+        per_edge_attention: bool = True,
     ):
         """
         Args:
             expert_graphs: List of M adjacency matrices
             init_uniform: If True, initialize with uniform weights
+            per_edge_attention: If True, learn per-edge expert weights
         """
         super().__init__()
         
-        stacked = torch.stack(expert_graphs)
+        stacked = torch.stack(expert_graphs)  # [M, n_rows, n_cols]
         self.register_buffer('expert_graphs', stacked)
         self.num_experts = len(expert_graphs)
+        self.per_edge_attention = per_edge_attention
         
-        # Initialize expert weight logits
+        n_rows, n_cols = expert_graphs[0].shape
+        
+        # Global expert weight logits
         if init_uniform:
             pi_init = torch.zeros(self.num_experts)
         else:
             pi_init = torch.randn(self.num_experts) * 0.1
-        
         self.pi_logits = nn.Parameter(pi_init)
+        
+        if per_edge_attention:
+            # Per-edge expert attention logits
+            # Initialize from agreement: experts that agree with majority get higher weight
+            vote_score = stacked.mean(dim=0)  # [n_rows, n_cols]
+            # Agreement of each expert with vote: high if expert matches consensus
+            expert_agreement = 1.0 - (stacked - vote_score.unsqueeze(0)).abs()  # [M, n_rows, n_cols]
+            # Initialize: experts that agree more get slightly higher logits
+            w_init = (expert_agreement - 0.5) * 0.5  # small init, centered near 0
+            self.edge_logits = nn.Parameter(w_init)  # [M, n_rows, n_cols]
         
         # Store vote score for reference
         vote_score = stacked.mean(dim=0)
         self.register_buffer('vote_score', vote_score)
+        self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
     
     def forward(self) -> Tensor:
-        """Returns weighted average graph Ã = Σ π_m * A^(m)."""
-        pi = F.softmax(self.pi_logits, dim=0)  # [M], sums to 1
-        # Weighted sum: einsum('m,mij->ij', pi, expert_graphs)
-        A_soft = torch.einsum('m,mij->ij', pi, self.expert_graphs)
+        """Returns weighted average graph with per-edge expert attention."""
+        if self.per_edge_attention:
+            # Per-edge softmax: for each (i,j), compute expert weights
+            # logits shape: [M, n_rows, n_cols]
+            combined_logits = self.pi_logits.view(-1, 1, 1) + self.edge_logits
+            weights = F.softmax(combined_logits, dim=0)  # [M, n_rows, n_cols]
+            A_soft = (weights * self.expert_graphs).sum(dim=0)  # [n_rows, n_cols]
+        else:
+            # Simple global weighting (original behavior)
+            pi = F.softmax(self.pi_logits, dim=0)
+            A_soft = torch.einsum('m,mij->ij', pi, self.expert_graphs)
         return A_soft
     
     def get_expert_weights(self) -> Tensor:
-        """Returns current expert weights π."""
+        """Returns global expert weights π."""
         return F.softmax(self.pi_logits, dim=0).detach()
+    
+    def get_edge_reliabilities(self) -> Optional[Tensor]:
+        """Returns the learned soft adjacency (for logging)."""
+        return self.forward().detach()
     
     def get_vote_score(self) -> Tensor:
         """Returns expert voting score for reference."""
