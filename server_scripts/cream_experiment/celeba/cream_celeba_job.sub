@@ -1,6 +1,7 @@
 universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
-executable              = run_cream_celeba.sh
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/celeba/run_cream_celeba.sh
 
 output                  = /home/dani00003/mCREAM/logs/cream_celeba.$(ClusterId).$(ProcId).out
 error                   = /home/dani00003/mCREAM/logs/cream_celeba.$(ClusterId).$(ProcId).err

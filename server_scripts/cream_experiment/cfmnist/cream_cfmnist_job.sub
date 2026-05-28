@@ -1,6 +1,7 @@
 universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
-executable              = run_cream_cfmnist.sh
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/cfmnist/run_cream_cfmnist.sh
 
 output                  = /home/dani00003/mCREAM/logs/cream_cfmnist.$(ClusterId).$(ProcId).out
 error                   = /home/dani00003/mCREAM/logs/cream_cfmnist.$(ClusterId).$(ProcId).err

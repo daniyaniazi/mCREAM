@@ -1,6 +1,7 @@
 universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
-executable              = run_cream.sh
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/run_cream.sh
 
 # Paths to output, error, and log files
 output                  = /home/dani00003/mCREAM/logs/cream.$(ClusterId).$(ProcId).out
