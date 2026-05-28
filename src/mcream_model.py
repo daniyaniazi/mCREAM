@@ -27,6 +27,7 @@ from .expert_graphs.aggregation import (
     EdgeReliabilityModule,
     GraphAttentionModule,
     CombinedReliabilityModule,
+    GraphLearningMLP,  # exported for external analysis/logging use
 )
 from .expert_graphs.losses import GraphRegularizationLoss
 
@@ -145,7 +146,7 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         
         # Graph learning schedule
         graph_lr: float = 0.01,          # 10× higher LR for graph params
-        graph_warmup_epochs: int = 5,    # Freeze graph for first N epochs
+        graph_warmup_epochs: int = 0,    # 0 = train graph from epoch 1 (recommended when backbone is frozen/stable)
         
         # CREAM parameters (same as UtoY_model)
         num_exogenous: int = 76,
@@ -555,17 +556,36 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         return optimizer
     
     def on_train_epoch_start(self):
-        """Implement graph warmup: freeze graph params for first N epochs."""
-        if self.current_epoch < self.graph_warmup_epochs:
-            # Freeze graph params during warmup
-            for name, param in self.named_parameters():
-                if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
-                    param.requires_grad = False
-        elif self.current_epoch == self.graph_warmup_epochs:
-            # Unfreeze graph params after warmup
-            for name, param in self.named_parameters():
-                if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
-                    param.requires_grad = True
+        """Graph warmup (optional) + Gumbel temperature annealing.
+
+        graph_warmup_epochs=0 (default): graph trains from epoch 1 alongside
+        the network. This works well because the frozen backbone means the
+        network is stable from the very first epoch, giving meaningful gradient
+        signal to the graph immediately.
+
+        Set graph_warmup_epochs > 0 only if using an unfrozen/fine-tuned backbone
+        where task accuracy takes several epochs to stabilize.
+        """
+        if self.graph_warmup_epochs > 0:
+            if self.current_epoch < self.graph_warmup_epochs:
+                # Freeze graph params during warmup
+                for name, param in self.named_parameters():
+                    if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
+                        param.requires_grad = False
+            elif self.current_epoch == self.graph_warmup_epochs:
+                # Unfreeze graph params after warmup
+                for name, param in self.named_parameters():
+                    if 'graph_agg_u2c' in name or 'graph_agg_c2y' in name:
+                        param.requires_grad = True
+
+        # Anneal Gumbel-Sigmoid temperature for all learnable aggregation modules.
+        # EdgeReliabilityModule, GraphAttentionModule, CombinedReliabilityModule
+        # and GraphLearningMLP all implement anneal() — duck-typed here so any
+        # future aggregation module with an anneal() method is handled automatically.
+        total_epochs = self.trainer.max_epochs if self.trainer else 50
+        for module in [self.graph_agg_u2c, self.graph_agg_c2y]:
+            if hasattr(module, 'anneal'):
+                module.anneal(self.current_epoch, total_epochs)
     
     # =========================================================================
     # Logging and Analysis Methods

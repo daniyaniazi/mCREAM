@@ -16,6 +16,29 @@ from typing import Tuple, Optional, List
 
 
 # =============================================================================
+# Shared Utility
+# =============================================================================
+
+def _gumbel_sigmoid(logits: Tensor, temperature: float) -> Tensor:
+    """
+    Gumbel-Sigmoid: differentiable approximation to hard Bernoulli sampling.
+
+    Adds Gumbel noise to logits before sigmoid, pushing outputs bimodally
+    toward 0 or 1. Provides gradient signal even when task loss is flat.
+
+        p = sigmoid((logit + Gumbel_noise) / T)
+
+    Args:
+        logits: Raw logits (any shape)
+        temperature: Lower → more binary output (0.1 = nearly hard)
+    """
+    eps = 1e-8
+    u = torch.rand_like(logits).clamp(eps, 1 - eps)
+    gumbel_noise = -torch.log(-torch.log(u))
+    return torch.sigmoid((logits + gumbel_noise) / temperature)
+
+
+# =============================================================================
 # Baseline (Non-Learnable) Aggregation Methods
 # =============================================================================
 
@@ -127,6 +150,10 @@ class EdgeReliabilityModule(nn.Module):
         init_from_vote: bool = True,
         learnable: bool = True,
         agreement_amplification: float = 2.0,
+        temperature: float = 1.0,
+        use_gumbel: bool = True,
+        anneal_temperature: bool = True,
+        min_temperature: float = 0.1,
     ):
         """
         Args:
@@ -135,6 +162,10 @@ class EdgeReliabilityModule(nn.Module):
             learnable: If True, α is learnable; if False, fixed to vote
             agreement_amplification: Scale factor for high-agreement edges.
                 Higher = more confident initialization on agreed-upon edges.
+            temperature: Gumbel-Sigmoid temperature (lower = more binary)
+            use_gumbel: If True, use Gumbel-Sigmoid during training
+            anneal_temperature: If True, temperature decays toward min_temperature
+            min_temperature: Minimum temperature after annealing
         """
         super().__init__()
         
@@ -164,12 +195,27 @@ class EdgeReliabilityModule(nn.Module):
         else:
             self.register_buffer('alpha', alpha_init)
         
+        # Gumbel-Sigmoid temperature
+        self.use_gumbel = use_gumbel
+        self.anneal_temperature = anneal_temperature
+        self.min_temperature = min_temperature
+        self.register_buffer('temperature', torch.tensor(temperature))
+
         # Store vote score and agreement for regularization
         self.register_buffer('vote_score', vote_score)
         self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
-    
+
+    def anneal(self, epoch: int, total_epochs: int) -> None:
+        """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
+        if self.anneal_temperature:
+            progress = epoch / max(total_epochs - 1, 1)
+            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            self.temperature.fill_(new_temp)
+
     def forward(self) -> Tensor:
-        """Returns soft adjacency matrix Ã = sigmoid(α)."""
+        """Returns soft adjacency matrix. Gumbel-Sigmoid during training."""
+        if self.training and self.use_gumbel:
+            return _gumbel_sigmoid(self.alpha, self.temperature.item())
         return torch.sigmoid(self.alpha)
     
     def get_edge_reliabilities(self) -> Tensor:
@@ -203,12 +249,20 @@ class GraphAttentionModule(nn.Module):
         expert_graphs: List[Tensor],
         init_uniform: bool = True,
         per_edge_attention: bool = True,
+        temperature: float = 1.0,
+        use_gumbel: bool = True,
+        anneal_temperature: bool = True,
+        min_temperature: float = 0.1,
     ):
         """
         Args:
             expert_graphs: List of M adjacency matrices
             init_uniform: If True, initialize with uniform weights
             per_edge_attention: If True, learn per-edge expert weights
+            temperature: Gumbel-Sigmoid temperature (lower = more binary)
+            use_gumbel: If True, apply Gumbel-Sigmoid to final output
+            anneal_temperature: If True, temperature decays toward min_temperature
+            min_temperature: Minimum temperature after annealing
         """
         super().__init__()
         
@@ -236,23 +290,39 @@ class GraphAttentionModule(nn.Module):
             w_init = (expert_agreement - 0.5) * 0.5  # small init, centered near 0
             self.edge_logits = nn.Parameter(w_init)  # [M, n_rows, n_cols]
         
+        # Gumbel-Sigmoid temperature
+        self.use_gumbel = use_gumbel
+        self.anneal_temperature = anneal_temperature
+        self.min_temperature = min_temperature
+        self.register_buffer('temperature', torch.tensor(temperature))
+
         # Store vote score for reference
         vote_score = stacked.mean(dim=0)
         self.register_buffer('vote_score', vote_score)
         self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
-    
+
+    def anneal(self, epoch: int, total_epochs: int) -> None:
+        """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
+        if self.anneal_temperature:
+            progress = epoch / max(total_epochs - 1, 1)
+            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            self.temperature.fill_(new_temp)
+
     def forward(self) -> Tensor:
-        """Returns weighted average graph with per-edge expert attention."""
+        """Returns weighted average graph. Gumbel-Sigmoid applied during training."""
         if self.per_edge_attention:
-            # Per-edge softmax: for each (i,j), compute expert weights
-            # logits shape: [M, n_rows, n_cols]
             combined_logits = self.pi_logits.view(-1, 1, 1) + self.edge_logits
             weights = F.softmax(combined_logits, dim=0)  # [M, n_rows, n_cols]
             A_soft = (weights * self.expert_graphs).sum(dim=0)  # [n_rows, n_cols]
         else:
-            # Simple global weighting (original behavior)
             pi = F.softmax(self.pi_logits, dim=0)
             A_soft = torch.einsum('m,mij->ij', pi, self.expert_graphs)
+
+        if self.training and self.use_gumbel:
+            # Convert soft output to logit space, then apply Gumbel-Sigmoid
+            eps = 1e-6
+            logits = torch.logit(A_soft.clamp(eps, 1 - eps))
+            return _gumbel_sigmoid(logits, self.temperature.item())
         return A_soft
     
     def get_expert_weights(self) -> Tensor:
@@ -285,11 +355,19 @@ class CombinedReliabilityModule(nn.Module):
         self,
         expert_graphs: List[Tensor],
         init_from_vote: bool = True,
+        temperature: float = 1.0,
+        use_gumbel: bool = True,
+        anneal_temperature: bool = True,
+        min_temperature: float = 0.1,
     ):
         """
         Args:
             expert_graphs: List of M adjacency matrices
             init_from_vote: If True, initialize from expert voting
+            temperature: Gumbel-Sigmoid temperature (lower = more binary)
+            use_gumbel: If True, apply Gumbel-Sigmoid to alpha logits
+            anneal_temperature: If True, temperature decays toward min_temperature
+            min_temperature: Minimum temperature after annealing
         """
         super().__init__()
         
@@ -310,17 +388,33 @@ class CombinedReliabilityModule(nn.Module):
         
         self.alpha = nn.Parameter(alpha_init)
         self.register_buffer('vote_score', vote_score)
-    
+
+        # Gumbel-Sigmoid temperature
+        self.use_gumbel = use_gumbel
+        self.anneal_temperature = anneal_temperature
+        self.min_temperature = min_temperature
+        self.register_buffer('temperature', torch.tensor(temperature))
+
+    def anneal(self, epoch: int, total_epochs: int) -> None:
+        """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
+        if self.anneal_temperature:
+            progress = epoch / max(total_epochs - 1, 1)
+            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            self.temperature.fill_(new_temp)
+
     def forward(self) -> Tensor:
-        """Returns combined aggregated graph."""
+        """Returns combined aggregated graph. Gumbel-Sigmoid on edge logits during training."""
         # Step 1: Graph-level aggregation
         pi = F.softmax(self.pi_logits, dim=0)
         A_weighted = torch.einsum('m,mij->ij', pi, self.expert_graphs)
-        
-        # Step 2: Edge-level refinement
-        A_soft = A_weighted * torch.sigmoid(self.alpha)
-        
-        return A_soft
+
+        # Step 2: Edge-level refinement with Gumbel-Sigmoid
+        if self.training and self.use_gumbel:
+            edge_probs = _gumbel_sigmoid(self.alpha, self.temperature.item())
+        else:
+            edge_probs = torch.sigmoid(self.alpha)
+
+        return A_weighted * edge_probs
     
     def get_expert_weights(self) -> Tensor:
         """Returns expert weights π."""
@@ -333,6 +427,137 @@ class CombinedReliabilityModule(nn.Module):
     def get_vote_score(self) -> Tensor:
         """Returns expert voting score."""
         return self.vote_score
+
+
+class GraphLearningMLP(nn.Module):
+    """
+    MLP-based graph learning: learns edge probabilities from M expert votes.
+
+    Instead of a single learnable scalar α per edge (EdgeReliabilityModule),
+    this uses a small shared MLP that takes M expert votes for each edge as
+    input and outputs a probability for that edge.
+
+    Architecture per edge (i,j):
+        [vote_1, vote_2, ..., vote_M]  →  MLP  →  logit  →  Gumbel-Sigmoid  →  p_ij
+
+    The MLP shares weights across ALL edges, so it learns a general rule:
+        "given this pattern of M votes, how confident should we be in this edge?"
+
+    Advantages over EdgeReliabilityModule (α per edge):
+    - Generalizes across edges: learns a function, not independent scalars
+    - Can capture complex patterns (e.g., "trust edge if experts 1,3,5 agree")
+    - More parameter efficient for large graphs
+
+    Gumbel-Sigmoid (during training):
+        p = sigmoid((logit + Gumbel_noise) / temperature)
+        → bimodal output, pushes edges toward 0 or 1
+        → still fully differentiable (unlike hard thresholding)
+    At inference: hard threshold at 0.5 → clean binary graph.
+    """
+
+    def __init__(
+        self,
+        expert_graphs: List[Tensor],
+        hidden_dim: int = 32,
+        temperature: float = 1.0,
+        use_gumbel: bool = True,
+        anneal_temperature: bool = True,
+        min_temperature: float = 0.1,
+    ):
+        """
+        Args:
+            expert_graphs: List of M binary adjacency matrices [n_rows, n_cols]
+            hidden_dim: Hidden layer size of the MLP
+            temperature: Gumbel-Sigmoid temperature (lower = more binary)
+            use_gumbel: If True, use Gumbel-Sigmoid during training
+            anneal_temperature: If True, temperature decays toward min_temperature
+            min_temperature: Minimum temperature after annealing
+        """
+        super().__init__()
+
+        stacked = torch.stack(expert_graphs)  # [M, n_rows, n_cols]
+        self.register_buffer('expert_graphs', stacked)
+        self.num_experts = len(expert_graphs)
+        self.use_gumbel = use_gumbel
+        self.anneal_temperature = anneal_temperature
+        self.min_temperature = min_temperature
+        self.register_buffer('temperature', torch.tensor(temperature))
+
+        # MLP: M votes → 1 edge logit (shared across all edges)
+        self.mlp = nn.Sequential(
+            nn.Linear(self.num_experts, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+            # No sigmoid here — raw logits, Gumbel-Sigmoid applied in forward()
+        )
+
+        # Initialize MLP last layer bias from vote score so we start near majority vote
+        vote_score = stacked.mean(dim=0)  # [n_rows, n_cols]
+        mean_vote = vote_score.mean().clamp(0.01, 0.99)
+        with torch.no_grad():
+            self.mlp[-1].bias.fill_(torch.logit(mean_vote).item())
+
+        # Store vote score for reference / regularization
+        self.register_buffer('vote_score', vote_score)
+        self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
+
+    def forward(self) -> Tensor:
+        """
+        Returns soft (or near-binary) adjacency matrix.
+
+        During training with Gumbel-Sigmoid: values bimodal near 0 or 1.
+        During eval / inference: hard threshold at 0.5 → binary float.
+        """
+        # expert_graphs: [M, n_rows, n_cols]
+        # Permute to [n_rows, n_cols, M] so MLP sees M votes per edge
+        edge_votes = self.expert_graphs.permute(1, 2, 0).float()  # [n_rows, n_cols, M]
+
+        # MLP maps M votes → 1 logit per edge
+        logits = self.mlp(edge_votes).squeeze(-1)  # [n_rows, n_cols]
+
+        if self.training and self.use_gumbel:
+            # Gumbel-Sigmoid: add Gumbel noise for bimodal, decisive output
+            eps = 1e-8
+            u = torch.rand_like(logits).clamp(eps, 1 - eps)
+            gumbel_noise = -torch.log(-torch.log(u))
+            return torch.sigmoid((logits + gumbel_noise) / self.temperature)
+        else:
+            # Eval: deterministic hard threshold → binary graph
+            return (torch.sigmoid(logits) > 0.5).float()
+
+    def get_soft_probs(self) -> Tensor:
+        """Returns deterministic soft probabilities (no Gumbel noise)."""
+        edge_votes = self.expert_graphs.permute(1, 2, 0).float()
+        logits = self.mlp(edge_votes).squeeze(-1)
+        return torch.sigmoid(logits).detach()
+
+    def get_edge_reliabilities(self) -> Tensor:
+        """Returns current edge probability values (for logging)."""
+        return self.get_soft_probs()
+
+    def get_expert_weights(self) -> Optional[Tensor]:
+        """MLP has no expert-level weights — return None."""
+        return None
+
+    def get_vote_score(self) -> Tensor:
+        """Returns expert voting score for reference."""
+        return self.vote_score
+
+    def anneal(self, epoch: int, total_epochs: int) -> None:
+        """
+        Anneal temperature from initial value toward min_temperature.
+        Call this at the start of each epoch.
+
+        Temperature schedule: linear decay
+            T(epoch) = T_init * (1 - epoch/total_epochs) + T_min * (epoch/total_epochs)
+        """
+        if self.anneal_temperature:
+            progress = epoch / max(total_epochs - 1, 1)
+            T_init = 1.0  # always start from 1.0
+            new_temp = T_init * (1 - progress) + self.min_temperature * progress
+            self.temperature.fill_(new_temp)
 
 
 # =============================================================================
@@ -370,6 +595,7 @@ def create_aggregation_module(
         'edge': EdgeReliabilityModule,
         'graph': GraphAttentionModule,
         'combined': CombinedReliabilityModule,
+        'mlp': GraphLearningMLP,          # MLP-based: M votes → edge prob (Gumbel-Sigmoid)
     }
     
     if aggregation_type not in modules:
