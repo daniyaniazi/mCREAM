@@ -13,6 +13,7 @@ else
 fi
 
 cd "$PROJECT_ROOT"
+mkdir -p "$PROJECT_ROOT/logs"
 
 echo "=============================================="
 echo "mCREAM: GraphMLP (M=10, Low) - CFMNIST"
