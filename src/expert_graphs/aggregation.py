@@ -213,7 +213,7 @@ class EdgeReliabilityModule(nn.Module):
             self.temperature.fill_(new_temp)
 
     def forward(self) -> Tensor:
-        """Returns soft adjacency matrix. Gumbel-Sigmoid during training.""
+        """Returns soft adjacency matrix. Gumbel-Sigmoid during training."""
         if self.training and self.use_gumbel:
             return _gumbel_sigmoid(self.alpha, self.temperature.item())
         return torch.sigmoid(self.alpha)
@@ -309,7 +309,7 @@ class GraphAttentionModule(nn.Module):
             self.temperature.fill_(new_temp)
 
     def forward(self) -> Tensor:
-        """Returns weighted average graph. Gumbel-Sigmoid applied during training.""
+        """Returns weighted average graph. Gumbel-Sigmoid applied during training."""
         if self.per_edge_attention:
             combined_logits = self.pi_logits.view(-1, 1, 1) + self.edge_logits
             weights = F.softmax(combined_logits, dim=0)  # [M, n_rows, n_cols]
