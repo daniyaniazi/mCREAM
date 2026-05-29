@@ -182,6 +182,8 @@ def create_mcream_model(
         
         # Graph learning schedule
         graph_lr=multi_expert.get("graph_lr", 0.01),
+        graph_u2c_lr=multi_expert.get("graph_u2c_lr", None),
+        graph_c2y_lr=multi_expert.get("graph_c2y_lr", None),
         graph_warmup_epochs=multi_expert.get("graph_warmup_epochs", 5),
         separate_graph_opt=multi_expert.get("separate_graph_opt", True),
         

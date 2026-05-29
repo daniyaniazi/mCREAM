@@ -144,8 +144,10 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         acyclicity_weight: float = 0.0,
         
         # Graph learning schedule
-        graph_lr: float = 0.01,          # 10× higher LR for graph params
-        graph_warmup_epochs: int = 0,    # 0 = train graph from epoch 1 (recommended when backbone is frozen/stable)
+        graph_lr: float = 0.01,
+        graph_u2c_lr: float = None,   # if None, uses graph_lr
+        graph_c2y_lr: float = None,   # if None, uses graph_lr
+        graph_warmup_epochs: int = 0,
         separate_graph_opt: bool = True, # If True: graph gets its own optimizer step with network frozen (cleaner gradient)
         
         # CREAM parameters (same as UtoY_model)
@@ -187,6 +189,8 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         
         # Graph learning schedule
         self.graph_lr = graph_lr
+        self.graph_u2c_lr = graph_u2c_lr if graph_u2c_lr is not None else graph_lr
+        self.graph_c2y_lr = graph_c2y_lr if graph_c2y_lr is not None else graph_lr
         self.graph_warmup_epochs = graph_warmup_epochs
         self.separate_graph_opt = separate_graph_opt
         # Manual optimization required for two separate optimizer steps
@@ -362,20 +366,28 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         """
         T = self.num_classes
         K = self.num_concepts
-        
-        # Step 1: Extract concept→task connections (first K columns)
-        # A_soft[:, c] tells us how much concept c influences each task
-        concept_mask = A_soft[:, :K]  # [T, K]
+
+        # A_soft can be [T x (K+T)] (full) or [T x K] (concept-only)
+        if A_soft.shape[1] == K:
+            # Concept cols only — side channel gets fixed ones (legacy behavior)
+            concept_mask = A_soft  # [T, K]
+        else:
+            # Full [T x (K+T)]: use learned concept→class AND learned class→class
+            concept_mask = A_soft[:, :K]  # [T, K]
         
         # Step 2: Handle side channel
-        # Side channel is processed through: Uy [num_side_channel] → Linear → [T] 
-        # We allow full connectivity from side channel to tasks
+        # When A_soft is full [T x (K+T)], use the learned class→class columns.
+        # When A_soft is [T x K] only, fall back to fixed ones.
         if self.num_side_channel > 0 or self.side_dropout:
-            side_mask = torch.ones(
-                T, T,  # [num_tasks, num_tasks] for side channel output
-                device=A_soft.device, 
-                dtype=A_soft.dtype
-            )
+            if A_soft.shape[1] > K:
+                # Use the learned class→class block as side channel mask
+                side_mask = A_soft[:, K:]  # [T, T] — learned
+            else:
+                side_mask = torch.ones(
+                    T, T,
+                    device=A_soft.device,
+                    dtype=A_soft.dtype
+                )
             full_mask = torch.cat([concept_mask, side_mask], dim=1)  # [T, K + T]
         else:
             full_mask = concept_mask  # [T, K]
@@ -591,27 +603,31 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        graph_module_names = {'graph_agg_u2c', 'graph_agg_c2y'}
-        graph_params, network_params = [], []
+        u2c_params, c2y_params, network_params = [], [], []
         for name, param in self.named_parameters():
-            if any(gm in name for gm in graph_module_names):
-                graph_params.append(param)
+            if 'graph_agg_u2c' in name:
+                u2c_params.append(param)
+            elif 'graph_agg_c2y' in name:
+                c2y_params.append(param)
             else:
                 network_params.append(param)
 
+        graph_params = u2c_params + c2y_params
+
         if self.separate_graph_opt and graph_params:
-            # Two separate optimizers for manual_optimization:
-            #   opt[0] = network (updated with graph output detached)
-            #   opt[1] = graph   (updated with full forward pass)
-            net_opt   = torch.optim.Adam(network_params, lr=self.learning_rate)
-            graph_opt = torch.optim.Adam(graph_params,   lr=self.graph_lr)
+            net_opt = torch.optim.Adam(network_params, lr=self.learning_rate)
+            graph_opt = torch.optim.Adam([
+                {'params': u2c_params, 'lr': self.graph_u2c_lr},
+                {'params': c2y_params, 'lr': self.graph_c2y_lr},
+            ])
             return [net_opt, graph_opt]
 
-        # Single optimizer (separate_graph_opt=False or no learnable graph params)
+        # Single optimizer
         if graph_params:
             return torch.optim.Adam([
                 {'params': network_params, 'lr': self.learning_rate},
-                {'params': graph_params,   'lr': self.graph_lr},
+                {'params': u2c_params,     'lr': self.graph_u2c_lr},
+                {'params': c2y_params,     'lr': self.graph_c2y_lr},
             ])
         return torch.optim.Adam(network_params, lr=self.learning_rate)
     
