@@ -178,6 +178,7 @@ def create_mcream_model(
         # Graph regularization
         prior_weight=multi_expert.get("graph_regularization", {}).get("prior_weight", 0.01),
         sparsity_weight=multi_expert.get("graph_regularization", {}).get("sparsity_weight", 0.001),
+        sparsity_weight_c2y=multi_expert.get("graph_regularization", {}).get("sparsity_weight_c2y", None),
         acyclicity_weight=multi_expert.get("graph_regularization", {}).get("acyclicity_weight", 0.0),
         
         # Graph learning schedule

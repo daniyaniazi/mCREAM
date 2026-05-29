@@ -208,12 +208,12 @@ class EdgeReliabilityModule(nn.Module):
     def anneal(self, epoch: int, total_epochs: int) -> None:
         """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
         if self.anneal_temperature:
-            progress = epoch / max(total_epochs - 1, 1)
-            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            progress = min(epoch / max(total_epochs - 1, 1), 1.0)  # clamp: guard against resume beyond max_epochs
+            new_temp = max(1.0 * (1 - progress) + self.min_temperature * progress, self.min_temperature)
             self.temperature.fill_(new_temp)
 
     def forward(self) -> Tensor:
-        """Returns soft adjacency matrix. Gumbel-Sigmoid during training."""
+        """Returns soft adjacency matrix. Gumbel-Sigmoid during training.""
         if self.training and self.use_gumbel:
             return _gumbel_sigmoid(self.alpha, self.temperature.item())
         return torch.sigmoid(self.alpha)
@@ -304,12 +304,12 @@ class GraphAttentionModule(nn.Module):
     def anneal(self, epoch: int, total_epochs: int) -> None:
         """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
         if self.anneal_temperature:
-            progress = epoch / max(total_epochs - 1, 1)
-            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            progress = min(epoch / max(total_epochs - 1, 1), 1.0)  # clamp: guard against resume beyond max_epochs
+            new_temp = max(1.0 * (1 - progress) + self.min_temperature * progress, self.min_temperature)
             self.temperature.fill_(new_temp)
 
     def forward(self) -> Tensor:
-        """Returns weighted average graph. Gumbel-Sigmoid applied during training."""
+        """Returns weighted average graph. Gumbel-Sigmoid applied during training.""
         if self.per_edge_attention:
             combined_logits = self.pi_logits.view(-1, 1, 1) + self.edge_logits
             weights = F.softmax(combined_logits, dim=0)  # [M, n_rows, n_cols]
@@ -398,8 +398,8 @@ class CombinedReliabilityModule(nn.Module):
     def anneal(self, epoch: int, total_epochs: int) -> None:
         """Anneal Gumbel temperature linearly from 1.0 → min_temperature."""
         if self.anneal_temperature:
-            progress = epoch / max(total_epochs - 1, 1)
-            new_temp = 1.0 * (1 - progress) + self.min_temperature * progress
+            progress = min(epoch / max(total_epochs - 1, 1), 1.0)  # clamp: guard against resume beyond max_epochs
+            new_temp = max(1.0 * (1 - progress) + self.min_temperature * progress, self.min_temperature)
             self.temperature.fill_(new_temp)
 
     def forward(self) -> Tensor:
@@ -562,9 +562,9 @@ class GraphLearningMLP(nn.Module):
             T(epoch) = T_init * (1 - epoch/total_epochs) + T_min * (epoch/total_epochs)
         """
         if self.anneal_temperature:
-            progress = epoch / max(total_epochs - 1, 1)
+            progress = min(epoch / max(total_epochs - 1, 1), 1.0)  # clamp: guard against resume beyond max_epochs
             T_init = 1.0  # always start from 1.0
-            new_temp = T_init * (1 - progress) + self.min_temperature * progress
+            new_temp = max(T_init * (1 - progress) + self.min_temperature * progress, self.min_temperature)
             self.temperature.fill_(new_temp)
 
 

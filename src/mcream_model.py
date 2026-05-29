@@ -11,6 +11,7 @@ Key differences from CREAM:
 4. Adds graph regularization losses
 """
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,9 +51,14 @@ class SoftMaskedLinear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         
-        self.weight = nn.Parameter(torch.randn(out_features, in_features) * 0.01)
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))  # same as nn.Linear
         if bias:
-            self.bias = nn.Parameter(torch.zeros(out_features))
+            # Match nn.Linear bias init: uniform(-1/sqrt(fan_in), 1/sqrt(fan_in))
+            fan_in = in_features
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            self.bias = nn.Parameter(torch.empty(out_features))
+            nn.init.uniform_(self.bias, -bound, bound)
         else:
             self.register_parameter('bias', None)
     
@@ -141,6 +147,7 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         # Graph regularization
         prior_weight: float = 0.01,
         sparsity_weight: float = 0.001,
+        sparsity_weight_c2y: Optional[float] = None,  # if None, uses sparsity_weight
         acyclicity_weight: float = 0.0,
         
         # Graph learning schedule
@@ -206,10 +213,18 @@ class mCREAM_UtoC_Y(pl.LightningModule):
             aggregation_type, expert_c2y_graphs
         )
         
-        # Graph regularization loss
-        self.graph_reg_loss = GraphRegularizationLoss(
+        # Graph regularization loss — separate weights for u2c vs c2y.
+        # c2y has far fewer edges and only 1 task loss signal, so it needs
+        # a lower sparsity penalty or sparsity wins at initialization.
+        sparsity_c2y = sparsity_weight_c2y if sparsity_weight_c2y is not None else sparsity_weight
+        self.graph_reg_loss_u2c = GraphRegularizationLoss(
             prior_weight=prior_weight,
             sparsity_weight=sparsity_weight,
+            acyclicity_weight=acyclicity_weight,
+        )
+        self.graph_reg_loss_c2y = GraphRegularizationLoss(
+            prior_weight=prior_weight,
+            sparsity_weight=sparsity_c2y,
             acyclicity_weight=acyclicity_weight,
         )
         
@@ -534,8 +549,8 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         # Do NOT call graph_agg() again — fresh Gumbel noise would decouple
         # sparsity gradient from the task gradient computed above.
         if stage == "train":
-            graph_loss_u2c = self.graph_reg_loss(self.graph_agg_u2c, A_soft_u2c)
-            graph_loss_c2y = self.graph_reg_loss(self.graph_agg_c2y, A_soft_c2y)
+            graph_loss_u2c = self.graph_reg_loss_u2c(self.graph_agg_u2c, A_soft_u2c)
+            graph_loss_c2y = self.graph_reg_loss_c2y(self.graph_agg_c2y, A_soft_c2y)
             graph_loss = graph_loss_u2c + graph_loss_c2y
         else:
             graph_loss = torch.tensor(0.0, device=x.device)
@@ -594,19 +609,22 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         self.manual_backward(net_loss)
         net_opt.step()
 
-        # ── Step 2: Update GRAPH weights (and get a free second network update) ──
-        # Full forward — graph NOT detached, gradient flows into graph params.
-        # After backward:
-        #   - graph_opt.step()  → updates graph params   (primary goal)
-        #   - net_opt.step()    → uses the network grads computed here for free
-        #                         (second network update per batch, no extra forward)
+        # ── Step 2: Update GRAPH weights only (network frozen) ──────────────
+        # Graph NOT detached — gradient flows into graph params.
+        # net_opt does NOT step here: if the network were allowed to adjust W
+        # in the same backward pass, it would compensate for any graph change
+        # (e.g., opening edge k → W[k] shrinks by same amount → net effect zero).
+        # Network must stay frozen so the graph has to change edges to reduce loss.
         if self.graph_warmup_epochs == 0 or self.current_epoch >= self.graph_warmup_epochs:
             graph_opt.zero_grad()
-            net_opt.zero_grad()   # clear Step 1 residual grads before Step 2 backward
+            # Do NOT zero/step net_opt here — Step 2 is GRAPH-ONLY.
+            # If net_opt.step() runs here too, last_layer.weight adjusts in the
+            # same backward pass to compensate for any graph change, cancelling
+            # the graph gradient. Network must be frozen so the graph must
+            # actually open/close edges to reduce the loss.
             loss, metrics = self._compute_loss(batch, "train")
             self.manual_backward(loss)
             graph_opt.step()
-            net_opt.step()   # free second network update using Step 2 grads
         else:
             metrics = {
                 "train_task_loss": task_loss,
