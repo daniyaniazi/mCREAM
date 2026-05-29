@@ -536,6 +536,10 @@ class GraphLearningMLP(nn.Module):
             return _gumbel_sigmoid(logits, self.temperature.item())
         return (torch.sigmoid(logits) > 0.5).float()
 
+    def get_logits(self) -> Tensor:
+        """Returns raw logits with gradient — for use in regularization losses."""
+        return self._get_logits()
+
     def get_soft_probs(self) -> Tensor:
         """Returns deterministic soft probabilities (no Gumbel noise)."""
         return torch.sigmoid(self._get_logits()).detach()
