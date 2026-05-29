@@ -142,7 +142,6 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         prior_weight: float = 0.01,
         sparsity_weight: float = 0.001,
         acyclicity_weight: float = 0.0,
-        confidence_weight: float = 0.05,
         
         # Graph learning schedule
         graph_lr: float = 0.01,          # 10× higher LR for graph params
@@ -185,7 +184,6 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         self.prior_weight = prior_weight
         self.sparsity_weight = sparsity_weight
         self.acyclicity_weight = acyclicity_weight
-        self.confidence_weight = confidence_weight
         
         # Graph learning schedule
         self.graph_lr = graph_lr
@@ -209,7 +207,6 @@ class mCREAM_UtoC_Y(pl.LightningModule):
             prior_weight=prior_weight,
             sparsity_weight=sparsity_weight,
             acyclicity_weight=acyclicity_weight,
-            confidence_weight=confidence_weight,
         )
         
         # =====================================================================

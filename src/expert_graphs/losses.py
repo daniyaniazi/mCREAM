@@ -198,7 +198,6 @@ class GraphRegularizationLoss(nn.Module):
         sparsity_weight: float = 0.001,
         acyclicity_weight: float = 0.0,
         entropy_weight: float = 0.0,
-        confidence_weight: float = 0.05,
         sparsity_type: str = "l1",  # 'sum' or 'l1'
     ):
         """
@@ -207,7 +206,6 @@ class GraphRegularizationLoss(nn.Module):
             sparsity_weight: Weight for sparsity loss (γ) — LOW to not kill recall
             acyclicity_weight: Weight for acyclicity loss (δ)
             entropy_weight: Weight for entropy regularization (ε)
-            confidence_weight: Weight for confidence loss (ζ) — push edges to 0 or 1
             sparsity_type: 'sum' or 'l1'
         """
         super().__init__()
@@ -215,7 +213,6 @@ class GraphRegularizationLoss(nn.Module):
         self.sparsity_weight = sparsity_weight
         self.acyclicity_weight = acyclicity_weight
         self.entropy_weight = entropy_weight
-        self.confidence_weight = confidence_weight
         self.sparsity_type = sparsity_type
     
     def forward(
@@ -256,10 +253,11 @@ class GraphRegularizationLoss(nn.Module):
                 else:
                     loss_sparse = l1_sparsity_loss(aggregation_module.alpha)
                 total_loss = total_loss + self.sparsity_weight * loss_sparse
-            elif A_soft is not None:
-                # For GraphLearningMLP: penalize mean edge probability directly
-                # L1 on soft probs = push all edges toward 0 unless task loss pulls them up
-                loss_sparse = A_soft.mean()
+            elif hasattr(aggregation_module, 'get_logits'):
+                # GraphLearningMLP: use deterministic sigmoid(logits), NOT the Gumbel sample.
+                # Gumbel output is near 0/1 already — computing sparsity on it gives
+                # noisy gradients and interacts badly with confidence loss.
+                loss_sparse = l1_sparsity_loss(aggregation_module.get_logits())
                 total_loss = total_loss + self.sparsity_weight * loss_sparse
         
         # Acyclicity loss (only for square matrices)
@@ -275,16 +273,6 @@ class GraphRegularizationLoss(nn.Module):
                 if pi is not None:
                     loss_entropy = entropy_regularization(pi)
                     total_loss = total_loss + self.entropy_weight * loss_entropy
-        
-        # Confidence loss: push edges to 0 or 1 (decisive)
-        if self.confidence_weight > 0:
-            if hasattr(aggregation_module, 'alpha'):
-                loss_conf = confidence_loss(aggregation_module.alpha)
-                total_loss = total_loss + self.confidence_weight * loss_conf
-            elif A_soft is not None:
-                # For graph attention module, apply to output directly
-                loss_conf = confidence_loss(A_soft, use_sigmoid=False)
-                total_loss = total_loss + self.confidence_weight * loss_conf
         
         return total_loss
     

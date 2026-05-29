@@ -21,7 +21,6 @@ multi_expert:
     prior_weight: 0.0
     sparsity_weight: 0.05
     acyclicity_weight: 0.0
-    confidence_weight: 0.1
   graph_lr: 0.05
   graph_warmup_epochs: 0
   separate_graph_opt: true
