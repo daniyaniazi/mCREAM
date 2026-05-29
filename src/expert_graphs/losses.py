@@ -248,11 +248,18 @@ class GraphRegularizationLoss(nn.Module):
         
         # Sparsity loss
         if self.sparsity_weight > 0:
+            # EdgeReliabilityModule / CombinedReliabilityModule use .alpha
+            # GraphLearningMLP uses soft_probs directly (no .alpha)
             if hasattr(aggregation_module, 'alpha'):
                 if self.sparsity_type == "sum":
                     loss_sparse = sparsity_loss(aggregation_module.alpha)
                 else:
                     loss_sparse = l1_sparsity_loss(aggregation_module.alpha)
+                total_loss = total_loss + self.sparsity_weight * loss_sparse
+            elif A_soft is not None:
+                # For GraphLearningMLP: penalize mean edge probability directly
+                # L1 on soft probs = push all edges toward 0 unless task loss pulls them up
+                loss_sparse = A_soft.mean()
                 total_loss = total_loss + self.sparsity_weight * loss_sparse
         
         # Acyclicity loss (only for square matrices)

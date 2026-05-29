@@ -1,7 +1,7 @@
 # mCREAM - GraphLearningMLP Aggregation (M=10, Structured Bias) - CelebA
 mode: train_cbm
 seed: 42
-seeds: [42, 7, 1, 134, 89]
+seeds: [42, 7]
 dataset_name: CelebA
 
 dataset_params:
@@ -17,12 +17,13 @@ multi_expert:
   disagreement_level: structured_bias
   aggregation_type: mlp
   graph_regularization:
-    prior_weight: 0.001
-    sparsity_weight: 0.001
+    prior_weight: 0.0
+    sparsity_weight: 0.05
     acyclicity_weight: 0.0
     confidence_weight: 0.1
   graph_lr: 0.05
   graph_warmup_epochs: 0
+  separate_graph_opt: true
 
 hyperparameters_model2:
   num_classes: 1

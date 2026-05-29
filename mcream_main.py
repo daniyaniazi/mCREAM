@@ -184,6 +184,7 @@ def create_mcream_model(
         # Graph learning schedule
         graph_lr=multi_expert.get("graph_lr", 0.01),
         graph_warmup_epochs=multi_expert.get("graph_warmup_epochs", 5),
+        separate_graph_opt=multi_expert.get("separate_graph_opt", True),
         
         # CREAM parameters
         num_exogenous=hparams["num_exogenous"],
