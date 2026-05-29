@@ -1,4 +1,4 @@
-universe                = docker
+﻿universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 executable              = /home/dani00003/mCREAM/server_scripts/mcream_experiment/celeba/graph_mlp/run_graph_mlp_M10_structured_bias.sh
 
