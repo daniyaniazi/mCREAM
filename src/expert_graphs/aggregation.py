@@ -431,34 +431,32 @@ class CombinedReliabilityModule(nn.Module):
 
 class GraphLearningMLP(nn.Module):
     """
-    MLP-based graph learning: learns edge probabilities from M expert votes.
+    MLP-based graph learning: learns edge probabilities from M expert votes
+    + a per-edge positional embedding.
 
-    Instead of a single learnable scalar α per edge (EdgeReliabilityModule),
-    this uses a small shared MLP that takes M expert votes for each edge as
-    input and outputs a probability for that edge.
+    WITHOUT positional embedding the MLP only sees vote patterns [v1..vM] and
+    cannot distinguish edges that have identical vote counts — it collapses to
+    "all edges with high votes → 1" (all-ones degenerate solution).
 
-    Architecture per edge (i,j):
-        [vote_1, vote_2, ..., vote_M]  →  MLP  →  logit  →  Gumbel-Sigmoid  →  p_ij
+    WITH positional embedding each edge (i,j) also gets a learned embedding
+    e_ij ∈ R^pos_dim, so the MLP can learn different thresholds per edge:
 
-    The MLP shares weights across ALL edges, so it learns a general rule:
-        "given this pattern of M votes, how confident should we be in this edge?"
+        input_ij = concat([vote_1, ..., vote_M, e_ij])   # M + pos_dim
+        logit_ij = MLP(input_ij)
 
-    Advantages over EdgeReliabilityModule (α per edge):
-    - Generalizes across edges: learns a function, not independent scalars
-    - Can capture complex patterns (e.g., "trust edge if experts 1,3,5 agree")
-    - More parameter efficient for large graphs
+    Bias init: set per-edge from vote_score logit (not global mean) so each
+    edge starts at its own vote proportion rather than the global average.
 
     Gumbel-Sigmoid (during training):
-        p = sigmoid((logit + Gumbel_noise) / temperature)
-        → bimodal output, pushes edges toward 0 or 1
-        → still fully differentiable (unlike hard thresholding)
-    At inference: hard threshold at 0.5 → clean binary graph.
+        p = sigmoid((logit + Gumbel_noise) / T)  →  bimodal near 0 or 1
+    At eval: hard threshold at 0.5 → clean binary graph.
     """
 
     def __init__(
         self,
         expert_graphs: List[Tensor],
         hidden_dim: int = 32,
+        pos_dim: int = 16,
         temperature: float = 1.0,
         use_gumbel: bool = True,
         anneal_temperature: bool = True,
@@ -468,6 +466,8 @@ class GraphLearningMLP(nn.Module):
         Args:
             expert_graphs: List of M binary adjacency matrices [n_rows, n_cols]
             hidden_dim: Hidden layer size of the MLP
+            pos_dim: Dimension of per-edge positional embedding.
+                     Set to 0 to disable (reverts to vote-only, may collapse).
             temperature: Gumbel-Sigmoid temperature (lower = more binary)
             use_gumbel: If True, use Gumbel-Sigmoid during training
             anneal_temperature: If True, temperature decays toward min_temperature
@@ -478,30 +478,61 @@ class GraphLearningMLP(nn.Module):
         stacked = torch.stack(expert_graphs)  # [M, n_rows, n_cols]
         self.register_buffer('expert_graphs', stacked)
         self.num_experts = len(expert_graphs)
+        self.pos_dim = pos_dim
         self.use_gumbel = use_gumbel
         self.anneal_temperature = anneal_temperature
         self.min_temperature = min_temperature
         self.register_buffer('temperature', torch.tensor(temperature))
 
-        # MLP: M votes → 1 edge logit (shared across all edges)
+        n_rows, n_cols = expert_graphs[0].shape
+        mlp_in = self.num_experts + pos_dim
+
+        # Per-edge positional embedding: one vector per (i,j) position
+        # Initialized small so votes dominate early, embedding refines later
+        if pos_dim > 0:
+            self.pos_embed = nn.Parameter(
+                torch.randn(n_rows, n_cols, pos_dim) * 0.01
+            )
+        else:
+            self.pos_embed = None
+
+        # Shared MLP: [M votes + pos_dim] → 1 edge logit
         self.mlp = nn.Sequential(
-            nn.Linear(self.num_experts, hidden_dim),
+            nn.Linear(mlp_in, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
-            # No sigmoid here — raw logits, Gumbel-Sigmoid applied in forward()
         )
 
-        # Initialize MLP last layer bias from vote score so we start near majority vote
+        # Per-edge bias init from individual vote_score logits
+        # (not global mean — avoids uniform high-bias collapse)
         vote_score = stacked.mean(dim=0)  # [n_rows, n_cols]
-        mean_vote = vote_score.mean().clamp(0.01, 0.99)
-        with torch.no_grad():
-            self.mlp[-1].bias.fill_(torch.logit(mean_vote).item())
+        alpha_init = torch.logit(vote_score.clamp(0.01, 0.99))  # [n_rows, n_cols]
+        # Store as per-edge bias offset applied after MLP
+        # Implemented as a learnable offset on top of MLP output
+        self.edge_bias = nn.Parameter(alpha_init)
 
         # Store vote score for reference / regularization
         self.register_buffer('vote_score', vote_score)
         self.register_buffer('agreement', (vote_score - 0.5).abs() * 2)
+
+    def _get_logits(self) -> Tensor:
+        """Compute raw logits: MLP(votes + pos_embed) + per-edge bias."""
+        # [n_rows, n_cols, M]
+        edge_votes = self.expert_graphs.permute(1, 2, 0).float()
+
+        if self.pos_embed is not None:
+            # Concat votes + positional embedding per edge
+            mlp_input = torch.cat([edge_votes, self.pos_embed], dim=-1)
+        else:
+            mlp_input = edge_votes
+
+        # MLP output: [n_rows, n_cols, 1] → [n_rows, n_cols]
+        mlp_out = self.mlp(mlp_input).squeeze(-1)
+
+        # Add per-edge bias (initialized from per-edge vote logit)
+        return mlp_out + self.edge_bias
 
     def forward(self) -> Tensor:
         """
@@ -510,28 +541,16 @@ class GraphLearningMLP(nn.Module):
         During training with Gumbel-Sigmoid: values bimodal near 0 or 1.
         During eval / inference: hard threshold at 0.5 → binary float.
         """
-        # expert_graphs: [M, n_rows, n_cols]
-        # Permute to [n_rows, n_cols, M] so MLP sees M votes per edge
-        edge_votes = self.expert_graphs.permute(1, 2, 0).float()  # [n_rows, n_cols, M]
-
-        # MLP maps M votes → 1 logit per edge
-        logits = self.mlp(edge_votes).squeeze(-1)  # [n_rows, n_cols]
+        logits = self._get_logits()  # [n_rows, n_cols]
 
         if self.training and self.use_gumbel:
-            # Gumbel-Sigmoid: add Gumbel noise for bimodal, decisive output
-            eps = 1e-8
-            u = torch.rand_like(logits).clamp(eps, 1 - eps)
-            gumbel_noise = -torch.log(-torch.log(u))
-            return torch.sigmoid((logits + gumbel_noise) / self.temperature)
+            return _gumbel_sigmoid(logits, self.temperature.item())
         else:
-            # Eval: deterministic hard threshold → binary graph
             return (torch.sigmoid(logits) > 0.5).float()
 
     def get_soft_probs(self) -> Tensor:
         """Returns deterministic soft probabilities (no Gumbel noise)."""
-        edge_votes = self.expert_graphs.permute(1, 2, 0).float()
-        logits = self.mlp(edge_votes).squeeze(-1)
-        return torch.sigmoid(logits).detach()
+        return torch.sigmoid(self._get_logits()).detach()
 
     def get_edge_reliabilities(self) -> Tensor:
         """Returns current edge probability values (for logging)."""

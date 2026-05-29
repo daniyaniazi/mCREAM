@@ -147,6 +147,7 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         # Graph learning schedule
         graph_lr: float = 0.01,          # 10× higher LR for graph params
         graph_warmup_epochs: int = 0,    # 0 = train graph from epoch 1 (recommended when backbone is frozen/stable)
+        separate_graph_opt: bool = True, # If True: graph gets its own optimizer step with network frozen (cleaner gradient)
         
         # CREAM parameters (same as UtoY_model)
         num_exogenous: int = 76,
@@ -189,6 +190,9 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         # Graph learning schedule
         self.graph_lr = graph_lr
         self.graph_warmup_epochs = graph_warmup_epochs
+        self.separate_graph_opt = separate_graph_opt
+        # Manual optimization required for two separate optimizer steps
+        self.automatic_optimization = not separate_graph_opt
         
         # =====================================================================
         # Graph Aggregation Modules (NEW in mCREAM)
@@ -518,9 +522,66 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         return total_loss, metrics
     
     def training_step(self, batch, batch_idx):
-        loss, metrics = self._compute_loss(batch, "train")
+        if not self.separate_graph_opt:
+            # Standard: single optimizer, both network and graph update together
+            loss, metrics = self._compute_loss(batch, "train")
+            self.log_dict(metrics, prog_bar=True)
+            return loss
+
+        # ── Manual two-step optimization ──────────────────────────────────────
+        # Graph MLP gets its own forward+backward with network weights frozen.
+        # This gives the graph a direct, clean gradient from task+concept loss
+        # instead of a weak signal through the full network backprop chain.
+        net_opt, graph_opt = self.optimizers()
+
+        # ── Step 1: Update NETWORK weights (graph params detached) ──────────
+        # Temporarily detach graph output so gradient stays in network only.
+        net_opt.zero_grad()
+        x, true_concepts, y_true = batch
+
+        # Forward with graph output detached from graph's computation graph
+        A_soft_u2c = self.graph_agg_u2c().detach()
+        A_soft_c2y = self.graph_agg_c2y().detach()
+        mask_u2c = self._build_u2c_mask(A_soft_u2c)
+        mask_c2y = self._build_c2y_mask(A_soft_c2y)
+        u = self.u2u_model(x)
+        Uc = u[:, :self.num_exogenous - self.num_side_channel]
+        Uy = u[:, self.num_exogenous - self.num_side_channel:]
+        c_logits = self.u2c_model(Uc, mask_u2c)
+        c = self.concept_activation_function(c_logits)
+        if self.side_channel is not None:
+            s = self.side_channel(Uy)
+            last_input = torch.cat([c, s], dim=1)
+        else:
+            last_input = c
+        y_pred = self.last_layer(last_input, mask_c2y)
+
+        task_loss = F.cross_entropy(y_pred, y_true) if self.num_classes > 1 else \
+                    F.binary_cross_entropy_with_logits(y_pred.squeeze(), y_true.float())
+        concept_loss = F.binary_cross_entropy_with_logits(c_logits, true_concepts.float())
+        net_loss = task_loss + self.lambda_weight * concept_loss
+        self.manual_backward(net_loss)
+        net_opt.step()
+
+        # ── Step 2: Update GRAPH weights only (network params frozen) ────────
+        # Full forward — graph output NOT detached, so gradient flows into graph.
+        # Network weights are frozen during this step (no zero_grad on net_opt).
+        if self.graph_warmup_epochs == 0 or self.current_epoch >= self.graph_warmup_epochs:
+            graph_opt.zero_grad()
+            loss, metrics = self._compute_loss(batch, "train")
+            self.manual_backward(loss)
+            graph_opt.step()
+        else:
+            metrics = {
+                "train_task_loss": task_loss,
+                "train_concept_loss": concept_loss,
+                "train_graph_loss": torch.tensor(0.0),
+                "train_task_accuracy": (y_pred.argmax(1) == y_true).float().mean(),
+                "train_concept_accuracy": ((c > 0.5) == true_concepts).float().mean(),
+            }
+
         self.log_dict(metrics, prog_bar=True)
-        return loss
+        return net_loss
     
     def validation_step(self, batch, batch_idx):
         loss, metrics = self._compute_loss(batch, "val")
@@ -533,27 +594,29 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        # Separate graph params from network params for different LRs
-        graph_params = []
-        network_params = []
-        
         graph_module_names = {'graph_agg_u2c', 'graph_agg_c2y'}
+        graph_params, network_params = [], []
         for name, param in self.named_parameters():
             if any(gm in name for gm in graph_module_names):
                 graph_params.append(param)
             else:
                 network_params.append(param)
-        
+
+        if self.separate_graph_opt and graph_params:
+            # Two separate optimizers for manual_optimization:
+            #   opt[0] = network (updated with graph output detached)
+            #   opt[1] = graph   (updated with full forward pass)
+            net_opt   = torch.optim.Adam(network_params, lr=self.learning_rate)
+            graph_opt = torch.optim.Adam(graph_params,   lr=self.graph_lr)
+            return [net_opt, graph_opt]
+
+        # Single optimizer (separate_graph_opt=False or no learnable graph params)
         if graph_params:
-            optimizer = torch.optim.Adam([
+            return torch.optim.Adam([
                 {'params': network_params, 'lr': self.learning_rate},
-                {'params': graph_params, 'lr': self.graph_lr},
+                {'params': graph_params,   'lr': self.graph_lr},
             ])
-        else:
-            # Baseline methods have no learnable graph params
-            optimizer = torch.optim.Adam(network_params, lr=self.learning_rate)
-        
-        return optimizer
+        return torch.optim.Adam(network_params, lr=self.learning_rate)
     
     def on_train_epoch_start(self):
         """Graph warmup (optional) + Gumbel temperature annealing.
