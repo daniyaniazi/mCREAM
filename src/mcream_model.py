@@ -482,9 +482,29 @@ class mCREAM_UtoC_Y(pl.LightningModule):
             metrics: Dictionary of individual metrics
         """
         x, true_concepts, y_true = batch
-        
-        # Forward pass - now returns logits too
-        y_pred, c_pred, c_logits = self(x)
+
+        # Get graph outputs ONCE — reuse for forward and regularization loss.
+        # Calling graph_agg() multiple times draws fresh Gumbel noise each time,
+        # causing the sparsity gradient and task gradient to push on different
+        # samples → conflicting updates, especially deadly for the weaker c2y graph.
+        A_soft_u2c = self.graph_agg_u2c()
+        A_soft_c2y = self.graph_agg_c2y()
+
+        # Forward pass using the same A_soft samples
+        mask_u2c = self._build_u2c_mask(A_soft_u2c)
+        mask_c2y = self._build_c2y_mask(A_soft_c2y)
+        u = self.u2u_model(x)
+        Uc = u[:, :self.num_exogenous - self.num_side_channel]
+        Uy = u[:, self.num_exogenous - self.num_side_channel:]
+        c_logits = self.u2c_model(Uc, mask_u2c)
+        c = self.concept_activation_function(c_logits)
+        if self.side_channel is not None:
+            s = self.side_channel(Uy)
+            last_input = torch.cat([c, s], dim=1)
+        else:
+            last_input = c
+        y_pred = self.last_layer(last_input, mask_c2y)
+        c_pred = c
         
         # Task loss (same as CREAM)
         if self.num_classes == 1:
@@ -510,10 +530,12 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         # Base loss: L = L_task + λ * L_concept
         base_loss = task_loss + self.lambda_weight * concept_loss
         
-        # Graph regularization loss (only during training)
+        # Graph regularization loss — reuse the SAME A_soft samples from forward.
+        # Do NOT call graph_agg() again — fresh Gumbel noise would decouple
+        # sparsity gradient from the task gradient computed above.
         if stage == "train":
-            graph_loss_u2c = self.graph_reg_loss(self.graph_agg_u2c, self.graph_agg_u2c())
-            graph_loss_c2y = self.graph_reg_loss(self.graph_agg_c2y, self.graph_agg_c2y())
+            graph_loss_u2c = self.graph_reg_loss(self.graph_agg_u2c, A_soft_u2c)
+            graph_loss_c2y = self.graph_reg_loss(self.graph_agg_c2y, A_soft_c2y)
             graph_loss = graph_loss_u2c + graph_loss_c2y
         else:
             graph_loss = torch.tensor(0.0, device=x.device)
@@ -572,14 +594,19 @@ class mCREAM_UtoC_Y(pl.LightningModule):
         self.manual_backward(net_loss)
         net_opt.step()
 
-        # ── Step 2: Update GRAPH weights only (network params frozen) ────────
-        # Full forward — graph output NOT detached, so gradient flows into graph.
-        # Network weights are frozen during this step (no zero_grad on net_opt).
+        # ── Step 2: Update GRAPH weights (and get a free second network update) ──
+        # Full forward — graph NOT detached, gradient flows into graph params.
+        # After backward:
+        #   - graph_opt.step()  → updates graph params   (primary goal)
+        #   - net_opt.step()    → uses the network grads computed here for free
+        #                         (second network update per batch, no extra forward)
         if self.graph_warmup_epochs == 0 or self.current_epoch >= self.graph_warmup_epochs:
             graph_opt.zero_grad()
+            net_opt.zero_grad()   # clear Step 1 residual grads before Step 2 backward
             loss, metrics = self._compute_loss(batch, "train")
             self.manual_backward(loss)
             graph_opt.step()
+            net_opt.step()   # free second network update using Step 2 grads
         else:
             metrics = {
                 "train_task_loss": task_loss,
