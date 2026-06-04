@@ -1366,7 +1366,12 @@ class UtoY_model(Template_MultiClass):
             classes = self.causal_graph[self.num_concepts :]
 
             # Check for columns without a value of 1 (or True)
-            columns_without_ones = ~classes.any(dim=0)
+            # columns_without_ones = ~classes.any(dim=0)
+            # Only examine the first num_concepts columns — these are the concept→task
+            # edges. Columns beyond num_concepts are task self-connections and must not
+            # be returned as concept indices (would be out of bounds in intervention mask).
+            concept_cols = classes[:, :self.num_concepts]
+            columns_without_ones = ~concept_cols.any(dim=0)
 
             # Get indices of such columns
             indirect_concept_indices = torch.where(columns_without_ones)[0]

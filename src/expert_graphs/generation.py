@@ -126,6 +126,12 @@ def generate_expert_graph(
     n_rows, n_cols = G_star.shape
     is_square = (n_rows == n_cols)
 
+    # For non-square c2y graphs [T×(K+T)], the last T columns are task
+    # self-connections (identity block) — structural, not causal edges.
+    # Never corrupt them: they must stay intact so intervention masks
+    # only contain valid concept indices (0..K-1).
+    safe_cols = n_rows if not is_square else n_cols  # columns to protect at end
+
     changed_del = 0
     changed_add = 0
     changed_rev = 0
@@ -133,6 +139,9 @@ def generate_expert_graph(
     for i in range(n_rows):
         for j in range(n_cols):
             if preserve_diagonal and is_square and i == j:
+                continue
+            # Skip task self-connection columns in non-square (c2y) graphs
+            if not is_square and j >= (n_cols - safe_cols):
                 continue
 
             if G_star[i, j] == 1:  # Edge exists
@@ -157,12 +166,17 @@ def generate_expert_graph(
 
     # Guarantee at least 1 change when probability > 0 but bad luck gave 0 changes
     if guarantee_min_change:
+        def _corruptible(i, j):
+            if preserve_diagonal and is_square and i == j:
+                return False
+            if not is_square and j >= (n_cols - safe_cols):
+                return False   # protect task self-connection columns
+            return True
+
         existing = [(i, j) for i in range(n_rows) for j in range(n_cols)
-                    if G_star[i, j] == 1
-                    and not (preserve_diagonal and is_square and i == j)]
-        absent  = [(i, j) for i in range(n_rows) for j in range(n_cols)
-                   if G_star[i, j] == 0
-                   and not (preserve_diagonal and is_square and i == j)]
+                    if G_star[i, j] == 1 and _corruptible(i, j)]
+        absent   = [(i, j) for i in range(n_rows) for j in range(n_cols)
+                    if G_star[i, j] == 0 and _corruptible(i, j)]
 
         if p_del > 0 and changed_del == 0 and existing:
             idx = np.random.randint(len(existing))
