@@ -466,6 +466,74 @@ class mCREAM_Ensemble(pl.LightningModule):
                 all_c.append(c_m)
         return all_y, all_c
 
+    def collect_expert_predictions(
+        self,
+        dataloader,
+        device: Optional[torch.device] = None,
+    ) -> "pd.DataFrame":
+        """
+        Run the full test set and collect per-expert predictions.
+
+        Returns a DataFrame with one row per sample:
+            y_true                  — ground truth label
+            y_ensemble              — ensemble hard prediction (argmax)
+            y_m_logits_{t}          — raw logit for class t from expert m
+            y_m_prob_{t}            — softmax probability for class t from expert m
+            y_m_pred                — argmax prediction from expert m
+            y_m_correct             — whether expert m was correct
+            ensemble_correct        — whether ensemble was correct
+
+        This lets you analyse:
+            - Which experts were right/wrong on which samples
+            - Whether the ensemble fixed individual expert errors
+            - Per-class accuracy per expert
+        """
+        import pandas as pd
+
+        if device is None:
+            device = next(self.parameters()).device
+
+        self.eval()
+        rows = []
+
+        with torch.no_grad():
+            for batch in dataloader:
+                x, true_concepts, y_true = batch
+                x, y_true = x.to(device), y_true.to(device)
+
+                u = self.backbone.concept_extractor(x)
+
+                # Per-expert predictions
+                all_y, all_c = [], []
+                for expert in self.experts:
+                    y_m, c_m = self._run_expert(expert, u)
+                    all_y.append(y_m)    # [B, T]
+                    all_c.append(c_m)
+
+                logits_stack = torch.stack(all_y, dim=0)   # [M, B, T]
+                y_ensemble = self.ensemble(logits_stack)    # [B, T]
+
+                probs_stack = torch.softmax(logits_stack, dim=-1)  # [M, B, T]
+                ensemble_pred = y_ensemble.argmax(dim=1)           # [B]
+
+                B = x.size(0)
+                for i in range(B):
+                    row = {
+                        "y_true": y_true[i].item(),
+                        "y_ensemble": ensemble_pred[i].item(),
+                        "ensemble_correct": (ensemble_pred[i] == y_true[i]).item(),
+                    }
+                    for m in range(self.num_experts):
+                        pred_m = logits_stack[m, i].argmax().item()
+                        row[f"y_{m}_pred"] = pred_m
+                        row[f"y_{m}_correct"] = (pred_m == y_true[i].item())
+                        for t in range(self.num_classes):
+                            row[f"y_{m}_logit_{t}"] = logits_stack[m, i, t].item()
+                            row[f"y_{m}_prob_{t}"] = probs_stack[m, i, t].item()
+                    rows.append(row)
+
+        return pd.DataFrame(rows)
+
     def forward_with_interventions(
         self,
         x: Tensor,

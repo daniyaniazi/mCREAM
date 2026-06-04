@@ -380,10 +380,36 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
     # =========================================================================
     edge_reliabilities = model.get_edge_reliabilities()
     if edge_reliabilities is not None:
-        print("\nLearned edge reliabilities (α) per expert:")
+        print("\nLearned edge reliabilities (alpha) per expert:")
         for m, (r_u2c, r_c2y) in enumerate(edge_reliabilities):
             if r_u2c is not None:
                 print(f"  expert_{m}: u2c mean={r_u2c.mean():.3f}  min={r_u2c.min():.3f}  max={r_u2c.max():.3f}")
+
+    # =========================================================================
+    # Per-expert predictions on test set
+    # Saves y_m for every expert + ensemble for every test sample.
+    # Allows post-hoc analysis: which expert was right, where ensemble helped.
+    # =========================================================================
+    print("\nSaving per-expert predictions on test set...")
+    device = next(model.parameters()).device
+    dataset.setup(stage="test")
+    expert_preds_df = model.collect_expert_predictions(
+        dataset.test_dataloader(), device=device
+    )
+
+    preds_save_dir = Path(pl_checkpoint_path) / "expert_predictions"
+    preds_save_dir.mkdir(parents=True, exist_ok=True)
+    preds_path = preds_save_dir / "per_expert_predictions.csv"
+    expert_preds_df.to_csv(preds_path, index=False)
+    print(f"  Saved {len(expert_preds_df)} rows x {len(expert_preds_df.columns)} cols to: {preds_path}")
+
+    # Quick per-expert accuracy summary
+    print("  Per-expert accuracy:")
+    for m in range(model.num_experts):
+        acc_m = expert_preds_df[f"y_{m}_correct"].mean()
+        print(f"    expert_{m}: {acc_m:.4f}")
+    ensemble_acc = expert_preds_df["ensemble_correct"].mean()
+    print(f"    ensemble:  {ensemble_acc:.4f}")
 
     # =========================================================================
     # Intervention curve
@@ -539,6 +565,10 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
         "action": me.get("action", ""),
         "noise_level": me.get("noise_level", me.get("disagreement_level", "")),
         "expert_weights": expert_weights.tolist() if expert_weights is not None else None,
+        "expert_predictions_path": str(preds_path),
+        # Per-expert test accuracy (from predictions CSV)
+        **{f"expert_{m}_test_accuracy": expert_preds_df[f"y_{m}_correct"].mean()
+           for m in range(model.num_experts)},
         # Per-expert mean edge reliability (soft_edge mode only)
         **({
             f"expert_{m}_u2c_alpha_mean": r_u2c.mean().item() if r_u2c is not None else None
