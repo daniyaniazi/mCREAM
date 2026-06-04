@@ -193,6 +193,50 @@ def generate_expert_graphs_from_dag(
     return expert_u2c_graphs, expert_c2y_graphs, u2c_star, c2y_star
 
 
+def generate_single_action_experts(
+    dag_path: str | Path,
+    num_classes: int,
+    num_experts: int,
+    action: str,
+    noise_level: str,
+    base_seed: int = 42,
+) -> Tuple[List[Tensor], List[Tensor], Tensor, Tensor]:
+    """
+    Generate M expert graphs where ALL experts share the same single corruption action
+    and the same noise probability.
+
+    This is the redesigned generation strategy: instead of mixing p_del + p_add + p_rev
+    simultaneously, we run three separate experiment families (deletion / addition / reversal)
+    and vary the noise level (low / medium / high) within each family.
+
+    Args:
+        dag_path: Path to ground truth DAG CSV
+        num_classes: Number of task classes
+        num_experts: Number of experts to generate
+        action: One of 'deletion', 'addition', 'reversal'
+        noise_level: One of 'low', 'medium', 'high'
+        base_seed: Base random seed
+
+    Returns:
+        expert_u2c_graphs, expert_c2y_graphs, u2c_star, c2y_star
+    """
+    if action not in SINGLE_ACTION_NOISE_LEVELS:
+        raise ValueError(f"Unknown action '{action}'. Choose from {list(SINGLE_ACTION_NOISE_LEVELS.keys())}")
+    if noise_level not in SINGLE_ACTION_NOISE_LEVELS[action]:
+        raise ValueError(f"Unknown noise_level '{noise_level}'. Choose from low/medium/high")
+
+    params = SINGLE_ACTION_NOISE_LEVELS[action][noise_level]
+    return generate_expert_graphs_from_dag(
+        dag_path=dag_path,
+        num_classes=num_classes,
+        num_experts=num_experts,
+        p_del=params["p_del"],
+        p_add=params["p_add"],
+        p_rev=params["p_rev"],
+        base_seed=base_seed,
+    )
+
+
 # =============================================================================
 # Structured Expert Bias
 # =============================================================================
@@ -201,6 +245,27 @@ DISAGREEMENT_LEVELS = {
     "low": {"p_del": 0.25, "p_add": 0.25, "p_rev": 0.10},
     "medium": {"p_del": 0.55, "p_add": 0.55, "p_rev": 0.25},
     "high": {"p_del": 0.85, "p_add": 0.85, "p_rev": 0.40},
+}
+
+# Single-action noise families: each expert uses only ONE type of corruption.
+# noise_level controls the probability for that single action; the other two are 0.
+# This gives clean science: we isolate what kind of graph error mCREAM is robust against.
+SINGLE_ACTION_NOISE_LEVELS = {
+    "deletion": {
+        "low":    {"p_del": 0.10, "p_add": 0.0, "p_rev": 0.0},
+        "medium": {"p_del": 0.30, "p_add": 0.0, "p_rev": 0.0},
+        "high":   {"p_del": 0.60, "p_add": 0.0, "p_rev": 0.0},
+    },
+    "addition": {
+        "low":    {"p_del": 0.0, "p_add": 0.10, "p_rev": 0.0},
+        "medium": {"p_del": 0.0, "p_add": 0.30, "p_rev": 0.0},
+        "high":   {"p_del": 0.0, "p_add": 0.60, "p_rev": 0.0},
+    },
+    "reversal": {
+        "low":    {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.10},
+        "medium": {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.30},
+        "high":   {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.60},
+    },
 }
 
 EXPERT_BIAS_TYPES = {
