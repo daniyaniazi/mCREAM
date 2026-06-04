@@ -463,26 +463,40 @@ class mCREAM_Ensemble(pl.LightningModule):
     ) -> Tuple[Tensor, dict]:
         x, true_concepts, y_true = batch
 
+        # Run backbone once
         u = self.backbone.concept_extractor(x)
 
+        # Run all experts once — collect both y_m (for task loss) and c_m (for concept loss)
         all_y, all_c = [], []
         total_concept_loss = torch.tensor(0.0, device=x.device)
-
         for expert in self.experts:
             y_m, c_m = self._run_expert(expert, u)
             all_y.append(y_m)
             all_c.append(c_m)
-            # Each expert individually predicts concepts — each pays its own loss
             total_concept_loss = total_concept_loss + F.binary_cross_entropy(
                 c_m.clamp(1e-7, 1 - 1e-7), true_concepts.float()
             )
-
         avg_concept_loss = total_concept_loss / self.num_experts
 
-        # Ensemble prediction → task loss
-        logits_stack = torch.stack(all_y, dim=0)
-        y_pred = self.ensemble(logits_stack)
+        # Ensemble prediction
+        logits_stack = torch.stack(all_y, dim=0)   # [M, B, T]
+        y_pred = self.ensemble(logits_stack)        # [B, T]
+        c_avg  = torch.stack(all_c, dim=0).mean(dim=0)  # [B, K]
 
+        # Fire proxy hooks so LogIntermediateLayerCallback captures activations.
+        # This is the equivalent of CREAM calling self(x) which runs u2u_model
+        # and last_layer — here we fire them explicitly via the proxy.
+        if self.num_side_channel > 0:
+            e0 = self.experts[0]
+            utoy = e0 if hasattr(e0, 'u2u_model') else e0.utoy
+            u_split = utoy.u2u_model(u)
+            Uy = u_split[:, self.num_concepts:]
+            s_avg = utoy.side_channel(Uy)
+        else:
+            s_avg = None
+        self.u_to_CY.record(u, c_avg, s_avg)
+
+        # Task loss
         if self.num_classes == 1:
             task_loss = F.binary_cross_entropy_with_logits(
                 y_pred.squeeze(), y_true.float()
@@ -492,8 +506,7 @@ class mCREAM_Ensemble(pl.LightningModule):
             task_loss = F.cross_entropy(y_pred, y_true)
             task_preds = y_pred.argmax(dim=1)
 
-        task_acc = (task_preds == y_true).float().mean()
-        c_avg = torch.stack(all_c, dim=0).mean(dim=0)
+        task_acc   = (task_preds == y_true).float().mean()
         concept_acc = ((c_avg > 0.5) == true_concepts).float().mean()
 
         total_loss = task_loss + self.lambda_weight * avg_concept_loss

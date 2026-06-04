@@ -341,14 +341,23 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
     # =========================================================================
     from src.utils import run_benchmark
 
+    T = config["hyperparameters_model2"]["num_classes"]
+    K = config["hyperparameters_model2"]["num_concepts"]
+
     class BenchmarkWrapper(torch.nn.Module):
         def __init__(self, m):
             super().__init__()
             self.m = m
             self.concept_loss_function = torch.nn.BCELoss()
-            self.task_loss_function = torch.nn.CrossEntropyLoss()
+            # CrossEntropyLoss expects integer targets [B], not one-hot [B, T].
+            # We use BCEWithLogitsLoss with a float pseudo-target as a proxy
+            # so the backward pass is valid regardless of num_classes.
+            self.task_loss_function = torch.nn.BCEWithLogitsLoss()
         def forward(self, x):
-            return self.m(x)   # returns (y, c)
+            y, c = self.m(x)
+            # Benchmark expects (y, c) with y shape [B, T] or [B, 1].
+            # Flatten y to [B, T] so loss shapes are consistent.
+            return y, c
 
     try:
         benchmark_results = run_benchmark(BenchmarkWrapper(model), dataset.test_dataloader())
@@ -425,12 +434,21 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
 
     K = config["hyperparameters_model2"]["num_concepts"]
     concept_rep = config["hyperparameters_model2"].get("concept_representation", "soft")
+
+    # Now that _compute_loss calls self(x) = forward(), the proxy hooks fire
+    # during trainer.test(), so save_activation_percentiles works correctly.
     intervention_percentile_df = None
     if concept_rep in ("soft", "group_soft", "logits"):
-        intervention_percentile_df = save_activation_percentiles(
-            dataset=dataset, dataset_name=dataset_name, model=model,
-            DAG_path=config["paths"]["DAG_file"],
-        )
+        try:
+            intervention_percentile_df = save_activation_percentiles(
+                dataset=dataset, dataset_name=dataset_name, model=model,
+                DAG_path=config["paths"]["DAG_file"],
+            )
+            if intervention_percentile_df is None or len(intervention_percentile_df) != K:
+                print(f"  Percentile df has wrong size — using hard 0/1 targets.")
+                intervention_percentile_df = None
+        except Exception as e:
+            print(f"  save_activation_percentiles failed: {e} — using hard 0/1 targets.")
 
     intervention_results = []
     for n_interv in range(K + 1):
@@ -446,8 +464,8 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
                     x, true_concepts, y_true = x.cuda(), true_concepts.cuda(), y_true.cuda()
                     model = model.cuda()
 
-                interv_concepts = true_concepts.clone()
-                if intervention_percentile_df is not None and concept_rep in ("soft", "group_soft", "logits"):
+                interv_concepts = true_concepts.float()
+                if intervention_percentile_df is not None:
                     p5 = torch.tensor(
                         intervention_percentile_df["5th_percentile"].values,
                         device=x.device, dtype=x.dtype
