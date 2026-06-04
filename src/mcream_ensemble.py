@@ -191,6 +191,70 @@ def _make_soft_expert(
 # =============================================================================
 # mCREAM_Ensemble
 # =============================================================================
+# Activation proxy for save_intermediate_values compatibility
+# =============================================================================
+
+class _LastLayerProxy(nn.Module):
+    """
+    Fake last_layer that the LogIntermediateLayerCallback can hook into.
+    During the ensemble forward pass we write the averaged [c, s] concatenation
+    into self._last_input, then call this module so the hook fires with the
+    correct ensemble-averaged activations — not just expert_0's activations.
+    """
+    def __init__(self):
+        super().__init__()
+        self._last_input: Optional[Tensor] = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        self._last_input = x
+        return x  # pass-through, output unused
+
+
+class _EnsembleActivationProxy(nn.Module):
+    """
+    Mimics the pl_module.u_to_CY interface expected by LogIntermediateLayerCallback.
+
+    The callback hooks into:
+        pl_module.u_to_CY.u2u_model   → to capture exogenous features u
+        pl_module.u_to_CY.last_layer  → to capture [c, s] input to task layer
+
+    mCREAM_Ensemble.forward() calls proxy.record(u, c_avg, s_avg) each batch,
+    which runs the proxy's u2u_model and last_layer so the hooks fire with the
+    ensemble-averaged values rather than any single expert's values.
+    """
+
+    def __init__(
+        self,
+        u2u_model: nn.Module,
+        num_concepts: int,
+        num_side_channel: int,
+        side_dropout: bool,
+    ):
+        super().__init__()
+        self.u2u_model = u2u_model   # shared with expert_0 — same splitter
+        self.last_layer = _LastLayerProxy()
+        self.side_dropout = side_dropout
+        self.num_concepts = num_concepts
+        self.num_side_channel = num_side_channel
+
+    def record(self, u: Tensor, c_avg: Tensor, s_avg: Optional[Tensor]) -> None:
+        """
+        Called from mCREAM_Ensemble.forward() with ensemble-averaged activations.
+        Runs u through u2u_model (fires exogenous hook) and runs [c,s] through
+        last_layer proxy (fires concept/side-channel hook).
+        """
+        with torch.no_grad():
+            # Fire the u hook — same u for all experts (shared backbone)
+            self.u2u_model(u)
+            # Fire the last_layer hook with ensemble-averaged [c, s]
+            if s_avg is not None:
+                last_input = torch.cat([c_avg, s_avg], dim=1)
+            else:
+                last_input = c_avg
+            self.last_layer(last_input)
+
+
+# =============================================================================
 
 class mCREAM_Ensemble(pl.LightningModule):
     """
@@ -307,6 +371,19 @@ class mCREAM_Ensemble(pl.LightningModule):
         # Prediction-level aggregation
         self.ensemble = _make_ensemble(ensemble_type, self.num_experts)
 
+        # Compatibility shim for save_intermediate_values / LogIntermediateLayerCallback.
+        # That callback expects pl_module.u_to_CY.u2u_model and pl_module.u_to_CY.last_layer.
+        # We create a thin pass-through object that holds the AVERAGED activations
+        # (averaged across all M experts) rather than expert_0's activations.
+        # The forward pass writes to _proxy.last_input and _proxy.u_output each step,
+        # so the hooks see the true ensemble-level concept representation.
+        self.u_to_CY = _EnsembleActivationProxy(
+            u2u_model=self.experts[0].u2u_model if hasattr(self.experts[0], 'u2u_model') else self.experts[0].utoy.u2u_model,
+            num_concepts=num_concepts,
+            num_side_channel=num_side_channel if num_side_channel else 0,
+            side_dropout=side_dropout,
+        )
+
         # Loss functions (same as CREAM's Template_CBM_MultiClass)
         if num_classes == 1:
             self.task_loss_function = nn.BCEWithLogitsLoss()
@@ -356,6 +433,22 @@ class mCREAM_Ensemble(pl.LightningModule):
         logits_stack = torch.stack(all_y, dim=0)    # [M, B, T]
         y = self.ensemble(logits_stack)             # [B, T]
         c = torch.stack(all_c, dim=0).mean(dim=0)  # [B, K]
+
+        # Fire proxy hooks so LogIntermediateLayerCallback captures the
+        # ensemble-averaged c (and s) rather than any single expert's values.
+        # u_to_CY.record() triggers both hooks: u2u_model hook with u,
+        # and last_layer hook with [c_avg, s_avg].
+        if self.num_side_channel > 0:
+            # Use expert_0's side channel on the same u — all experts share the
+            # same backbone output u and the same side channel architecture.
+            e0 = self.experts[0]
+            utoy = e0 if hasattr(e0, 'u2u_model') else e0.utoy
+            u_split = utoy.u2u_model(u)
+            Uy = u_split[:, self.num_concepts:]
+            s_avg = utoy.side_channel(Uy)
+        else:
+            s_avg = None
+        self.u_to_CY.record(u, c, s_avg)
 
         return y, c
 
