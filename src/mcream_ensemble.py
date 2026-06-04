@@ -309,10 +309,13 @@ class mCREAM_Ensemble(pl.LightningModule):
         self.num_classes = num_classes
         self.num_concepts = num_concepts
         self.num_side_channel = num_side_channel
+        self.num_exogenous = num_exogenous
         self.lambda_weight = lambda_weight
         self.learning_rate = learning_rate
         self.expert_mode = expert_mode
         self.ensemble_type = ensemble_type
+        # Correct split point: Uc = u_split[:, :uc_dim],  Uy = u_split[:, uc_dim:]
+        self._uc_dim = num_exogenous - num_side_channel
 
         # Shared frozen backbone
         self.backbone = backbone
@@ -444,7 +447,7 @@ class mCREAM_Ensemble(pl.LightningModule):
             e0 = self.experts[0]
             utoy = e0 if hasattr(e0, 'u2u_model') else e0.utoy
             u_split = utoy.u2u_model(u)
-            Uy = u_split[:, self.num_concepts:]
+            Uy = u_split[:, self._uc_dim:]
             s_avg = utoy.side_channel(Uy)
         else:
             s_avg = None
@@ -490,7 +493,7 @@ class mCREAM_Ensemble(pl.LightningModule):
             e0 = self.experts[0]
             utoy = e0 if hasattr(e0, 'u2u_model') else e0.utoy
             u_split = utoy.u2u_model(u)
-            Uy = u_split[:, self.num_concepts:]
+            Uy = u_split[:, self._uc_dim:]
             s_avg = utoy.side_channel(Uy)
         else:
             s_avg = None
