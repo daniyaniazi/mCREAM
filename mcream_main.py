@@ -55,6 +55,12 @@ def load_or_generate_expert_graphs(
     if expert_dir.exists() and (expert_dir / "config.yaml").exists():
         print(f"Loading expert graphs from {expert_dir}")
         expert_u2c, expert_c2y, gen_config = load_expert_graphs(expert_dir)
+
+        # Slice to num_experts from config — generate 10 once, run M=2/5/10 from same folder.
+        M = config.get("multi_expert", {}).get("num_experts", len(expert_u2c))
+        expert_u2c = expert_u2c[:M]
+        expert_c2y = expert_c2y[:M]
+        print(f"  Using {M} of {gen_config.get('num_experts', '?')} available expert graphs")
         
         # Load ground truth
         gt_dir = expert_dir / "ground_truth"

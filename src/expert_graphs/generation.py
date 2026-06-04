@@ -402,13 +402,13 @@ def load_expert_graphs(
     expert_u2c_graphs = []
     for pt_file in sorted(u2c_dir.glob("expert_*.pt")):
         expert_u2c_graphs.append(torch.load(pt_file, weights_only=True))
-    
+
     # Load c2y graphs
     c2y_dir = input_dir / "c2y"
     expert_c2y_graphs = []
     for pt_file in sorted(c2y_dir.glob("expert_*.pt")):
         expert_c2y_graphs.append(torch.load(pt_file, weights_only=True))
-    
+
     return expert_u2c_graphs, expert_c2y_graphs, config
 
 
