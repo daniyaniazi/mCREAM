@@ -21,7 +21,7 @@ echo "=============================================="
 echo "HOST=$(hostname)"
 "$PYTHON_BIN" -V
 
-"$PYTHON_BIN" generate_ensemble_expert_graphs.py --dataset all --num_experts 5
+"$PYTHON_BIN" generate_ensemble_expert_graphs.py --dataset all --num_experts 10
 
 echo ""
 echo "=============================================="
