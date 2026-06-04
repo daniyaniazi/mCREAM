@@ -97,48 +97,92 @@ def generate_expert_graph(
     p_rev: float = 0.05,
     seed: Optional[int] = None,
     preserve_diagonal: bool = True,
+    guarantee_min_change: bool = True,
 ) -> Tensor:
     """
     Generate one expert graph by corrupting ground truth.
-    
+
     Args:
         G_star: Ground truth adjacency matrix [n_rows, n_cols]
-        p_del: Probability of deleting existing edge
-        p_add: Probability of adding non-existing edge
-        p_rev: Probability of reversing edge direction (only for square matrices)
+        p_del: Probability of deleting an existing edge
+        p_add: Probability of adding a non-existing edge
+        p_rev: Probability of reversing an edge direction.
+               For square matrices (u2c): flips i→j to j→i.
+               For non-square matrices (c2y): treated as deletion — the expert
+               believes the concept does not cause the task, so removes the edge.
         seed: Random seed for reproducibility
-        preserve_diagonal: If True, don't modify diagonal entries (self-loops)
-    
+        preserve_diagonal: Skip diagonal entries (self-loops)
+        guarantee_min_change: If True and p > 0 but no change happened (bad luck
+               with few edges), force exactly 1 random change of that type.
+               Prevents degenerate experts that are identical to ground truth.
+
     Returns:
         G_expert: Corrupted expert graph with same shape as G_star
     """
     if seed is not None:
         np.random.seed(seed)
-    
+
     G_expert = G_star.clone()
     n_rows, n_cols = G_star.shape
     is_square = (n_rows == n_cols)
-    
+
+    changed_del = 0
+    changed_add = 0
+    changed_rev = 0
+
     for i in range(n_rows):
         for j in range(n_cols):
-            # Skip diagonal if preserving
-            if preserve_diagonal and i == j and is_square:
+            if preserve_diagonal and is_square and i == j:
                 continue
-            
+
             if G_star[i, j] == 1:  # Edge exists
                 rand_val = np.random.random()
                 if rand_val < p_del:
-                    # Deletion: remove edge
                     G_expert[i, j] = 0
-                elif is_square and rand_val < p_del + p_rev:
-                    # Reversal: flip direction (only for square matrices)
-                    G_expert[i, j] = 0
-                    G_expert[j, i] = 1
-            else:  # Edge doesn't exist
+                    changed_del += 1
+                elif rand_val < p_del + p_rev:
+                    if is_square:
+                        # True reversal: flip direction i→j becomes j→i
+                        G_expert[i, j] = 0
+                        G_expert[j, i] = 1
+                    else:
+                        # c2y is not square — reversal means "expert believes
+                        # this concept does not cause this task" → deletion
+                        G_expert[i, j] = 0
+                    changed_rev += 1
+            else:  # Edge does not exist
                 if np.random.random() < p_add:
-                    # Addition: add spurious edge
                     G_expert[i, j] = 1
-    
+                    changed_add += 1
+
+    # Guarantee at least 1 change when probability > 0 but bad luck gave 0 changes
+    if guarantee_min_change:
+        existing = [(i, j) for i in range(n_rows) for j in range(n_cols)
+                    if G_star[i, j] == 1
+                    and not (preserve_diagonal and is_square and i == j)]
+        absent  = [(i, j) for i in range(n_rows) for j in range(n_cols)
+                   if G_star[i, j] == 0
+                   and not (preserve_diagonal and is_square and i == j)]
+
+        if p_del > 0 and changed_del == 0 and existing:
+            idx = np.random.randint(len(existing))
+            i, j = existing[idx]
+            G_expert[i, j] = 0
+
+        if p_add > 0 and changed_add == 0 and absent:
+            idx = np.random.randint(len(absent))
+            i, j = absent[idx]
+            G_expert[i, j] = 1
+
+        if p_rev > 0 and changed_rev == 0 and existing:
+            idx = np.random.randint(len(existing))
+            i, j = existing[idx]
+            if is_square:
+                G_expert[i, j] = 0
+                G_expert[j, i] = 1
+            else:
+                G_expert[i, j] = 0
+
     return G_expert
 
 
