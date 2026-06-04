@@ -252,19 +252,19 @@ DISAGREEMENT_LEVELS = {
 # This gives clean science: we isolate what kind of graph error mCREAM is robust against.
 SINGLE_ACTION_NOISE_LEVELS = {
     "deletion": {
-        "low":    {"p_del": 0.10, "p_add": 0.0, "p_rev": 0.0},
-        "medium": {"p_del": 0.30, "p_add": 0.0, "p_rev": 0.0},
-        "high":   {"p_del": 0.60, "p_add": 0.0, "p_rev": 0.0},
+        "low":    {"p_del": 0.25, "p_add": 0.0, "p_rev": 0.0},
+        "medium": {"p_del": 0.50, "p_add": 0.0, "p_rev": 0.0},
+        "high":   {"p_del": 0.75, "p_add": 0.0, "p_rev": 0.0},
     },
     "addition": {
-        "low":    {"p_del": 0.0, "p_add": 0.10, "p_rev": 0.0},
-        "medium": {"p_del": 0.0, "p_add": 0.30, "p_rev": 0.0},
-        "high":   {"p_del": 0.0, "p_add": 0.60, "p_rev": 0.0},
+        "low":    {"p_del": 0.0, "p_add": 0.25, "p_rev": 0.0},
+        "medium": {"p_del": 0.0, "p_add": 0.50, "p_rev": 0.0},
+        "high":   {"p_del": 0.0, "p_add": 0.75, "p_rev": 0.0},
     },
     "reversal": {
-        "low":    {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.10},
-        "medium": {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.30},
-        "high":   {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.60},
+        "low":    {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.25},
+        "medium": {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.50},
+        "high":   {"p_del": 0.0, "p_add": 0.0, "p_rev": 0.75},
     },
 }
 

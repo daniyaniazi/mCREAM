@@ -21,7 +21,10 @@ model_name: mCREAM_FashionMNIST
 multi_expert:
   enabled: true
   num_experts: 5
-  disagreement_level: medium  # low, medium, high
+  disagreement_level: medium
+  noise_type: single_action
+  action: deletion
+  noise_level: medium  # low, medium, high
   
   # Aggregation method: 'edge', 'graph', 'combined', 'union', 'intersection', 'majority'
   aggregation_type: edge

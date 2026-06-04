@@ -18,6 +18,9 @@ multi_expert:
   enabled: true
   num_experts: 10
   disagreement_level: structured_bias
+  noise_type: single_action
+  action: deletion
+  noise_level: medium
   expert_types: ['conservative', 'liberal', 'balanced', 'conservative', 'liberal', 'conservative', 'liberal', 'balanced', 'conservative', 'liberal']
   aggregation_type: edge
   graph_regularization:
@@ -52,6 +55,6 @@ paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/
   DAG_file: ./data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv
-  expert_graphs_dir: ./data/FashionMNIST/expert_graphs/M10/structured_bias/
+  expert_graphs_dir: ./data/FashionMNIST/expert_graphs/ensemble/deletion_medium/
   input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
   softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json

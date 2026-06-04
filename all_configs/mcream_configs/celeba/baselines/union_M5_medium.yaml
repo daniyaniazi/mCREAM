@@ -18,7 +18,7 @@ paths:
   metric_dir: ./last_metrics/
   DAG_file: ./data/CelebA/final_DAG_unfair.csv
   input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
-  expert_graphs_dir: ./data/CelebA/expert_graphs/M5/medium/
+  expert_graphs_dir: ./data/CelebA/expert_graphs/ensemble/deletion_medium/
 
 # =============================================================================
 # mCREAM Settings
@@ -27,6 +27,9 @@ multi_expert:
   enabled: true
   num_experts: 5
   disagreement_level: medium
+  noise_type: single_action
+  action: deletion
+  noise_level: medium
   aggregation_type: union           # BASELINE: Union of all experts
   graph_regularization:
     prior_weight: 0.0               # No regularization for baseline
