@@ -241,14 +241,40 @@ def log_expert_corruption(
     u2c_star: torch.Tensor,
     c2y_star: torch.Tensor,
 ) -> List[dict]:
+    """
+    For each expert compute:
+      spurious edges  = edges in expert but NOT in ground truth  (false positives, addition noise)
+      missing edges   = edges in ground truth but NOT in expert  (false negatives, deletion noise)
+      total changed   = spurious + missing
+    Reported separately for u2c (concept→concept) and c2y (concept→task) graphs.
+    """
     stats = []
     for m, (u2c, c2y) in enumerate(zip(expert_u2c, expert_c2y)):
-        pct_u2c = (u2c.bool() != u2c_star.bool()).sum().item() / u2c_star.numel() * 100
-        pct_c2y = (c2y.bool() != c2y_star.bool()).sum().item() / c2y_star.numel() * 100
-        print(f"    expert_{m}: u2c {pct_u2c:.1f}% changed, c2y {pct_c2y:.1f}% changed")
+        def edge_stats(expert: torch.Tensor, gt: torch.Tensor):
+            e = expert.bool()
+            g = gt.bool()
+            spurious = (~g &  e).sum().item()   # added edges (FP)
+            missing  = ( g & ~e).sum().item()   # deleted edges (FN)
+            total    = g.numel()
+            gt_edges = g.sum().item()
+            return spurious, missing, total, gt_edges
+
+        sp_u2c, ms_u2c, tot_u2c, gt_u2c = edge_stats(u2c, u2c_star)
+        sp_c2y, ms_c2y, tot_c2y, gt_c2y = edge_stats(c2y, c2y_star)
+
+        print(f"    expert_{m}: "
+              f"u2c spurious={sp_u2c} missing={ms_u2c}/{gt_u2c} edges | "
+              f"c2y spurious={sp_c2y} missing={ms_c2y}/{gt_c2y} edges")
+
         stats.append({
-            f"expert_{m}_u2c_corruption_pct": pct_u2c,
-            f"expert_{m}_c2y_corruption_pct": pct_c2y,
+            f"expert_{m}_u2c_spurious_edges":    sp_u2c,
+            f"expert_{m}_u2c_missing_edges":     ms_u2c,
+            f"expert_{m}_u2c_gt_edges":          gt_u2c,
+            f"expert_{m}_u2c_corruption_pct":    (sp_u2c + ms_u2c) / tot_u2c * 100,
+            f"expert_{m}_c2y_spurious_edges":    sp_c2y,
+            f"expert_{m}_c2y_missing_edges":     ms_c2y,
+            f"expert_{m}_c2y_gt_edges":          gt_c2y,
+            f"expert_{m}_c2y_corruption_pct":    (sp_c2y + ms_c2y) / tot_c2y * 100,
         })
     return stats
 
@@ -450,11 +476,46 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
         except Exception as e:
             print(f"  save_activation_percentiles failed: {e} — using hard 0/1 targets.")
 
+    # per_expert_task_correct[m] accumulates correct booleans for expert m
+    M = model.num_experts
+    T = config["hyperparameters_model2"]["num_classes"]
+
+    # Pre-compute per-expert edge stats so every intervention row carries them.
+    # This links the "how broken is this graph" question directly to "how
+    # does the intervention curve behave for this expert".
+    def _edge_stats(expert_graph: torch.Tensor, gt: torch.Tensor):
+        """Returns (spurious, missing, gt_edges) for concept columns only."""
+        K_ = config["hyperparameters_model2"]["num_concepts"]
+        # For c2y graphs [T×(K+T)], only the first K columns are concept→task
+        if expert_graph.shape[0] != expert_graph.shape[1]:
+            e = expert_graph[:, :K_].bool()
+            g = gt[:, :K_].bool()
+        else:
+            e = expert_graph.bool()
+            g = gt.bool()
+        return (~g & e).sum().item(), (g & ~e).sum().item(), g.sum().item()
+
+    expert_edge_info = []
+    for m, (u2c, c2y) in enumerate(zip(expert_u2c, expert_c2y)):
+        sp_u2c, ms_u2c, gt_u2c = _edge_stats(u2c, u2c_star)
+        sp_c2y, ms_c2y, gt_c2y = _edge_stats(c2y, c2y_star)
+        expert_edge_info.append({
+            "expert": m,
+            "u2c_spurious": sp_u2c, "u2c_missing": ms_u2c, "u2c_gt_edges": gt_u2c,
+            "c2y_spurious": sp_c2y, "c2y_missing": ms_c2y, "c2y_gt_edges": gt_c2y,
+            "total_spurious": sp_u2c + sp_c2y,
+            "total_missing":  ms_u2c + ms_c2y,
+        })
+
     intervention_results = []
+    per_expert_intervention_results = []   # one row per (n_interv, expert)
+
     for n_interv in range(K + 1):
         model.eval()
         all_task_correct = []
         all_concept_correct = []
+        # Per-expert accumulators: list of M lists
+        expert_task_correct = [[] for _ in range(M)]
 
         dataset.setup(stage="test")
         with torch.no_grad():
@@ -476,9 +537,10 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
                     )
                     interv_concepts = true_concepts.float() * p95 + (1 - true_concepts.float()) * p5
 
+                # ── Ensemble intervention (existing) ─────────────────────────
                 y_pred, c_pred = model.forward_with_interventions(x, interv_concepts, n_interv)
 
-                if config["hyperparameters_model2"]["num_classes"] == 1:
+                if T == 1:
                     task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
                 else:
                     task_preds = y_pred.argmax(dim=1)
@@ -486,17 +548,54 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
                 all_task_correct.append((task_preds == y_true.view(-1)).float())
                 all_concept_correct.append(((c_pred > 0.5) == true_concepts).float().mean(dim=1))
 
-        task_acc = torch.cat(all_task_correct).mean().item()
+                # ── Per-expert intervention ───────────────────────────────────
+                # Run each expert independently with the same intervention count
+                u = model.backbone.concept_extractor(x)
+                for m, expert in enumerate(model.experts):
+                    if model.expert_mode == "hard":
+                        y_m, c_m = expert.forward_with_interventions(
+                            u, interv_concepts, n_interv
+                        )
+                    else:  # soft_edge
+                        y_m, c_m, _ = expert.forward_with_interventions(
+                            u, interv_concepts, n_interv
+                        )
+                    if T == 1:
+                        preds_m = (torch.sigmoid(y_m) > 0.5).int().view(-1)
+                    else:
+                        preds_m = y_m.argmax(dim=1)
+                    expert_task_correct[m].append((preds_m == y_true.view(-1)).float())
+
+        # ── Aggregate ensemble results ────────────────────────────────────────
+        task_acc    = torch.cat(all_task_correct).mean().item()
         concept_acc = torch.cat(all_concept_correct).mean().item()
         intervention_results.append({
             "num_interventions": n_interv,
             "test_task_accuracy": task_acc,
             "test_concept_accuracy": concept_acc,
         })
-        print(f"    interventions={n_interv}: task_acc={task_acc:.4f}")
+
+        # ── Aggregate per-expert results ──────────────────────────────────────
+        for m in range(M):
+            expert_acc = torch.cat(expert_task_correct[m]).mean().item()
+            row = {
+                "num_interventions": n_interv,
+                "expert": m,
+                "test_task_accuracy": expert_acc,
+            }
+            # Attach edge corruption info so notebook can plot both together
+            row.update(expert_edge_info[m])
+            per_expert_intervention_results.append(row)
+
+        print(f"    interventions={n_interv}: ensemble={task_acc:.4f}  "
+              f"experts=[{', '.join(f'{torch.cat(expert_task_correct[m]).mean().item():.3f}' for m in range(M))}]")
 
     interv_path = Path(pl_checkpoint_path) / "intervention_results.csv"
     pd.DataFrame(intervention_results).to_csv(interv_path, index=False)
+
+    per_expert_interv_path = Path(pl_checkpoint_path) / "per_expert_intervention_results.csv"
+    pd.DataFrame(per_expert_intervention_results).to_csv(per_expert_interv_path, index=False)
+    print(f"  Saved per-expert intervention results to: {per_expert_interv_path}")
 
     # =========================================================================
     # PFI / SAGE / CCI  (same pipeline as CREAM, using first expert's last layer)
