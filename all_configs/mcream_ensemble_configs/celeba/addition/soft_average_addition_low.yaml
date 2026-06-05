@@ -37,7 +37,7 @@ hyperparameters:
   frozen_model1: true
 
 trainer_param:
-  max_epochs: 20
+  max_epochs: 40
 
 experiment_name: ensemble_soft_average_addition_low
 
