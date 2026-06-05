@@ -598,72 +598,179 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
     print(f"  Saved per-expert intervention results to: {per_expert_interv_path}")
 
     # =========================================================================
-    # PFI / SAGE / CCI  (same pipeline as CREAM, using first expert's last layer)
+    # PFI / SAGE / CCI — computed for EACH EXPERT independently
+    # Each expert is a full CREAM model with its own last_layer and [c_m, s_m].
+    # We collect per-expert latents in one pass, then run PFI + SAGE per expert.
     # =========================================================================
     num_side = config["hyperparameters_model2"].get("num_side_channel", 0)
     results_pfi = {}
 
     if num_side > 0:
         from src.PFI_accuracy import PFI_accuracies
+        from src.sage_importance_functions import prepare_shap_data, group_importance_metric
+        from src.diff_permutation_estimator import PermutationEstimator as my_PermutationEstimator
+        import sage as sage_lib
+        import torch.nn as tnn
 
-        first_expert = model.experts[0]
+        T_cls = config["hyperparameters_model2"]["num_classes"]
+        batch_size_cfg = config.get("dataset_params", {}).get("batch_size", 128)
+        n_workers_cfg  = config.get("dataset_params", {}).get("num_workers", 4)
 
-        class LastLayerForPFI(torch.nn.Module):
-            def __init__(self, layer):
-                super().__init__()
-                self.layer = layer
-            def forward(self, x):
-                return self.layer(x)
+        # ── Step 1: Collect [c_m, s_m, label] for every expert in one pass ──
+        # Shape per expert: rows = N_samples, cols = [label, c_0..c_K, s_0..s_S]
+        print("\nCollecting per-expert latent activations...")
 
-        pfi_layer = LastLayerForPFI(first_expert.last_layer)
+        def collect_expert_latents(split: str) -> list:
+            """Returns list of M DataFrames, one per expert, format matching PFI input."""
+            loader = dataset.train_dataloader() if split == "train" else dataset.test_dataloader()
+            dataset.setup(stage="fit" if split == "train" else "test")
+            loader = dataset.train_dataloader() if split == "train" else dataset.test_dataloader()
 
-        print("\nComputing PFI importances...")
-        try:
-            concept_dropped_score, side_dropped_score = PFI_accuracies(
-                pfi_layer, test_latent[0], K, repeat=100
-            )
-            test_acc = val_train_metrics.get("test_task_accuracy", 0.0)
-            results_pfi["PFI_concept_importance"] = test_acc - concept_dropped_score
-            results_pfi["PFI_side_importance"] = test_acc - side_dropped_score
-            print(f"  PFI concept importance: {results_pfi['PFI_concept_importance']:.4f}")
-            print(f"  PFI side importance: {results_pfi['PFI_side_importance']:.4f}")
-        except Exception as e:
-            print(f"  PFI failed: {e}")
+            # buffers: [M] lists of (label, c, s) tensors
+            bufs_label = []
+            bufs_c     = [[] for _ in range(M)]
+            bufs_s     = [[] for _ in range(M)]
 
-        print("\nComputing SAGE / CCI...")
-        try:
-            import sage
-            import torch.nn as tnn
-            from src.sage_importance_functions import prepare_shap_data, group_importance_metric
-            from src.diff_permutation_estimator import PermutationEstimator as my_PermutationEstimator
+            model.eval()
+            with torch.no_grad():
+                for batch in loader:
+                    x_b, _, y_b = batch
+                    if torch.cuda.is_available():
+                        x_b, y_b = x_b.cuda(), y_b.cuda()
+                        model_cuda = model.cuda()
+                    else:
+                        model_cuda = model
+                    u = model_cuda.backbone.concept_extractor(x_b)
+                    bufs_label.append(y_b.cpu())
+                    for m_idx, expert in enumerate(model_cuda.experts):
+                        # Run full expert forward — returns (y_m, c_m) or (y_m, c_m, c_logits)
+                        out = expert(u)
+                        c_m = out[1]  # concept activations [B, K]
+                        # Get side channel output: run u2u → split → side_channel
+                        u_split = expert.u2u_model(u)
+                        Uy = u_split[:, model_cuda._uc_dim:]
+                        s_m = expert.side_channel(Uy)
+                        bufs_c[m_idx].append(c_m.cpu())
+                        bufs_s[m_idx].append(s_m.cpu())
 
-            train_x, _, train_group_names, train_groups = prepare_shap_data(train_latent[1])
-            test_x, test_y, test_group_names, test_groups = prepare_shap_data(test_latent[1])
-            train_x, test_x, test_y = train_x.to_numpy(), test_x.to_numpy(), test_y.to_numpy()
+            labels_all = torch.cat(bufs_label).numpy()
+            dfs = []
+            for m_idx in range(M):
+                c_all = torch.cat(bufs_c[m_idx]).numpy()
+                s_all = torch.cat(bufs_s[m_idx]).numpy()
+                # Build DataFrame matching PFI/SAGE expected format:
+                # col 0: datapoint_idx, col 1: labels, col 2..K+1: concepts, K+2..: side
+                df = pd.DataFrame()
+                df["datapoint_idx"] = range(len(labels_all))
+                df["labels"] = labels_all
+                for k in range(c_all.shape[1]):
+                    df[f"c_dim_{k}"] = c_all[:, k]
+                for s in range(s_all.shape[1]):
+                    df[f"s_dim_{s}"] = s_all[:, s]
+                dfs.append(df)
+            return dfs
 
-            T = config["hyperparameters_model2"]["num_classes"]
-            explained_model = tnn.Sequential(
-                pfi_layer,
-                tnn.Softmax(dim=1) if T > 1 else tnn.Sigmoid(),
-            )
-            twenty_pct = int(len(train_latent[1]) * 0.2)
-            imputer = sage.GroupedMarginalImputer(explained_model, train_x[:twenty_pct], test_groups)
-            estimator = my_PermutationEstimator(
-                imputer, "cross entropy", random_state=seed,
-                n_jobs=config.get("dataset_params", {}).get("num_workers", 4)
-            )
-            sage_values = estimator(
-                test_x, test_y,
-                batch_size=config.get("dataset_params", {}).get("batch_size", 128),
-                thresh=0.05, bar=False, max_time=3600,
-            )
-            explanation_values = dict(zip(test_group_names, sage_values.values))
-            cci = group_importance_metric(explanation_values)
-            print(f"  CCI: {cci:.4f}")
-            results_pfi["CCI"] = cci
-        except Exception as e:
-            print(f"  SAGE/CCI failed: {e}")
-            results_pfi["CCI"] = None
+        train_latents_per_expert = collect_expert_latents("train")
+        test_latents_per_expert  = collect_expert_latents("test")
+        print(f"  Collected latents for {M} experts")
+
+        # ── Step 2: Per-expert PFI + SAGE/CCI ────────────────────────────────
+        per_expert_pfi_cci = []
+
+        for m_idx, expert in enumerate(model.experts):
+            print(f"\n  Expert {m_idx}/{M-1}: PFI + SAGE/CCI")
+
+            class LastLayerWrapped(tnn.Module):
+                def __init__(self, layer): super().__init__(); self.layer = layer
+                def forward(self, x): return self.layer(x)
+
+            pfi_layer_m = LastLayerWrapped(expert.last_layer)
+            train_df_m  = train_latents_per_expert[m_idx]
+            test_df_m   = test_latents_per_expert[m_idx]
+
+            row_m = {"expert": m_idx}
+
+            # PFI
+            try:
+                concept_dropped, side_dropped = PFI_accuracies(
+                    pfi_layer_m, test_df_m, K, repeat=100
+                )
+                expert_acc_m = (test_df_m["labels"].values ==
+                                pfi_layer_m(
+                                    torch.tensor(test_df_m.iloc[:, 2:K+2].values,
+                                                 dtype=torch.float32)
+                                ).argmax(dim=1).numpy()).mean()
+                row_m["PFI_concept_importance"] = float(expert_acc_m - concept_dropped)
+                row_m["PFI_side_importance"]    = float(expert_acc_m - side_dropped)
+                print(f"    PFI concept={row_m['PFI_concept_importance']:.4f}  "
+                      f"side={row_m['PFI_side_importance']:.4f}")
+            except Exception as e:
+                print(f"    PFI failed: {e}")
+                row_m["PFI_concept_importance"] = None
+                row_m["PFI_side_importance"]    = None
+
+            # SAGE / CCI
+            try:
+                train_x_m, _, grp_names, grp_idx = prepare_shap_data(train_df_m)
+                test_x_m, test_y_m, _, _          = prepare_shap_data(test_df_m)
+                train_x_m = train_x_m.to_numpy()
+                test_x_m  = test_x_m.to_numpy()
+                test_y_m  = test_y_m.to_numpy()
+
+                explained_m = tnn.Sequential(
+                    pfi_layer_m,
+                    tnn.Softmax(dim=1) if T_cls > 1 else tnn.Sigmoid(),
+                )
+                twenty = int(len(train_df_m) * 0.2)
+                imputer_m = sage_lib.GroupedMarginalImputer(
+                    explained_m, train_x_m[:twenty], grp_idx
+                )
+                estimator_m = my_PermutationEstimator(
+                    imputer_m, "cross entropy",
+                    random_state=seed, n_jobs=n_workers_cfg
+                )
+
+                from src.utils import timeout
+
+                @timeout(3600)
+                def run_sage_m():
+                    return estimator_m(test_x_m, test_y_m,
+                                       batch_size=batch_size_cfg,
+                                       thresh=0.05, bar=False)
+
+                sv = run_sage_m()
+                expl = dict(zip(grp_names, sv.values))
+                cci_m = group_importance_metric(expl)
+                row_m["CCI"] = float(cci_m)
+                print(f"    CCI={cci_m:.4f}")
+            except Exception as e:
+                print(f"    SAGE/CCI failed: {e}")
+                row_m["CCI"] = None
+
+            per_expert_pfi_cci.append(row_m)
+
+        # Save per-expert PFI/CCI to CSV
+        per_expert_pfi_path = Path(pl_checkpoint_path) / "per_expert_pfi_cci.csv"
+        pd.DataFrame(per_expert_pfi_cci).to_csv(per_expert_pfi_path, index=False)
+        print(f"\n  Saved per-expert PFI/CCI to: {per_expert_pfi_path}")
+
+        # Also store in results (use mean across experts as summary)
+        valid_cci = [r["CCI"] for r in per_expert_pfi_cci if r["CCI"] is not None]
+        valid_pfi_c = [r["PFI_concept_importance"] for r in per_expert_pfi_cci
+                       if r["PFI_concept_importance"] is not None]
+        valid_pfi_s = [r["PFI_side_importance"] for r in per_expert_pfi_cci
+                       if r["PFI_side_importance"] is not None]
+
+        results_pfi["CCI"]                  = float(np.mean(valid_cci))  if valid_cci   else None
+        results_pfi["PFI_concept_importance"] = float(np.mean(valid_pfi_c)) if valid_pfi_c else None
+        results_pfi["PFI_side_importance"]    = float(np.mean(valid_pfi_s)) if valid_pfi_s else None
+
+        # Per-expert values in results
+        for r in per_expert_pfi_cci:
+            m_idx = r["expert"]
+            results_pfi[f"expert_{m_idx}_CCI"]                  = r["CCI"]
+            results_pfi[f"expert_{m_idx}_PFI_concept_importance"] = r["PFI_concept_importance"]
+            results_pfi[f"expert_{m_idx}_PFI_side_importance"]    = r["PFI_side_importance"]
 
     # =========================================================================
     # Compile and save results
