@@ -502,14 +502,14 @@ class mCREAM_Ensemble(pl.LightningModule):
         # Task loss
         if self.num_classes == 1:
             task_loss = F.binary_cross_entropy_with_logits(
-                y_pred.squeeze(), y_true.float()
+                y_pred.squeeze(-1), y_true.float().squeeze(-1)
             )
-            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze()
+            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze(-1)
         else:
             task_loss = F.cross_entropy(y_pred, y_true)
             task_preds = y_pred.argmax(dim=1)
 
-        task_acc   = (task_preds == y_true).float().mean()
+        task_acc   = (task_preds == y_true.view(-1)).float().mean()
         concept_acc = ((c_avg > 0.5) == true_concepts).float().mean()
 
         total_loss = task_loss + self.lambda_weight * avg_concept_loss
@@ -620,22 +620,32 @@ class mCREAM_Ensemble(pl.LightningModule):
                     all_c.append(c_m)
 
                 logits_stack = torch.stack(all_y, dim=0)   # [M, B, T]
-                y_ensemble = self.ensemble(logits_stack)    # [B, T]
+                y_ensemble = self.ensemble(logits_stack)    # [B, T] or [B, 1]
 
-                probs_stack = torch.softmax(logits_stack, dim=-1)  # [M, B, T]
-                ensemble_pred = y_ensemble.argmax(dim=1)           # [B]
+                # Binary classification (CelebA: num_classes=1)
+                if self.num_classes == 1:
+                    probs_stack   = torch.sigmoid(logits_stack)
+                    ensemble_pred = (torch.sigmoid(y_ensemble) > 0.5).int().squeeze(-1)
+                else:
+                    probs_stack   = torch.softmax(logits_stack, dim=-1)
+                    ensemble_pred = y_ensemble.argmax(dim=1)
+
+                y_true_flat = y_true.view(-1)
 
                 B = x.size(0)
                 for i in range(B):
                     row = {
-                        "y_true": y_true[i].item(),
+                        "y_true": y_true_flat[i].item(),
                         "y_ensemble": ensemble_pred[i].item(),
-                        "ensemble_correct": (ensemble_pred[i] == y_true[i]).item(),
+                        "ensemble_correct": (ensemble_pred[i] == y_true_flat[i]).item(),
                     }
                     for m in range(self.num_experts):
-                        pred_m = logits_stack[m, i].argmax().item()
+                        if self.num_classes == 1:
+                            pred_m = (torch.sigmoid(logits_stack[m, i]) > 0.5).int().item()
+                        else:
+                            pred_m = logits_stack[m, i].argmax().item()
                         row[f"y_{m}_pred"] = pred_m
-                        row[f"y_{m}_correct"] = (pred_m == y_true[i].item())
+                        row[f"y_{m}_correct"] = (pred_m == y_true_flat[i].item())
                         for t in range(self.num_classes):
                             row[f"y_{m}_logit_{t}"] = logits_stack[m, i, t].item()
                             row[f"y_{m}_prob_{t}"] = probs_stack[m, i, t].item()
