@@ -15,12 +15,6 @@ echo "HOST=$(hostname)"
 "$PYTHON_BIN" -V
 nvidia-smi || true
 
-# Convert expert graphs to DAG CSV if not done yet
-DAG_CSV="$PROJECT_ROOT/data/CelebA/expert_graphs/ensemble/addition_low/cream_noisy_dags/expert_3.csv"
-if [ ! -f "$DAG_CSV" ]; then
-    echo "Converting expert graphs to DAG CSVs..."
-    "$PYTHON_BIN" convert_expert_graphs_to_csv.py --dataset celeba
-fi
 
 echo "Running standalone CREAM on addition/low/expert3..."
 "$PYTHON_BIN" simple_main.py --config all_configs/mcream_configs/celeba/cream_noisy_ensemble/cream_noisy_addition_low_expert3.yaml
