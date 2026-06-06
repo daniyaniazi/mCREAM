@@ -86,9 +86,16 @@ def my_main(config_path: Path) -> None:
     gradient_clip_algorithm = None  # used for gradient clipping
     config = load_config(config_path)
     config_path = Path(config_path)
-    config_simple_name_version = (
-        config_path.stem.split("_")[0] + "_" + config_path.stem.split("_")[1]
-    )
+    # Use experiment_name from config if present (avoids truncation for long names
+    # like cream_noisy_deletion_medium_expert0 which would all collapse to "cream_noisy").
+    # Fall back to the original 2-part truncation for backward compatibility.
+    experiment_name_from_config = config.get("experiment_name", None)
+    if experiment_name_from_config:
+        config_simple_name_version = experiment_name_from_config
+    else:
+        config_simple_name_version = (
+            config_path.stem.split("_")[0] + "_" + config_path.stem.split("_")[1]
+        )
     config_folder = config_path.parent.name
 
     # Load configuration
