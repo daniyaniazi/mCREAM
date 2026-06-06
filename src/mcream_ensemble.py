@@ -466,44 +466,78 @@ class mCREAM_Ensemble(pl.LightningModule):
     ) -> Tuple[Tensor, dict]:
         x, true_concepts, y_true = batch
 
-        # Run backbone once
+        # ── Shared backbone (frozen) ──────────────────────────────────────────
         u = self.backbone.concept_extractor(x)
 
-        # Run all experts once — collect both y_m (for task loss) and c_m (for concept loss)
+        # ── Per-expert loss (each expert trains exactly like standalone CREAM) ─
+        # CREAM loss = task_loss + λ * concept_loss
+        # Each expert m independently:
+        #   - predicts concepts c_m  → concept_loss_m = BCE(c_m, true_concepts)
+        #   - predicts tasks    y_m  → task_loss_m    = CrossEntropy(y_m, y_true)
+        #   - expert_loss_m = task_loss_m + λ * concept_loss_m
         all_y, all_c = [], []
-        total_concept_loss = torch.tensor(0.0, device=x.device)
+        expert_losses = torch.tensor(0.0, device=x.device)
+
         for expert in self.experts:
             y_m, c_m = self._run_expert(expert, u)
             all_y.append(y_m)
             all_c.append(c_m)
-            total_concept_loss = total_concept_loss + F.binary_cross_entropy(
-                c_m.clamp(1e-7, 1 - 1e-7), true_concepts.float()
-            )
-        avg_concept_loss = total_concept_loss / self.num_experts
 
-        # Ensemble prediction
-        logits_stack = torch.stack(all_y, dim=0)   # [M, B, T]
-        y_pred = self.ensemble(logits_stack)        # [B, T]
-        c_avg  = torch.stack(all_c, dim=0).mean(dim=0)  # [B, K]
-
-        # Per-expert individual task loss.
-        # Each expert also minimises its OWN CrossEntropy independently,
-        # so it receives a full task gradient — not the 1/M-diluted ensemble gradient.
-        # This ensures each expert is as strong as a standalone CREAM on its noisy graph.
-        # Divided by M for scale balance (keeps total loss magnitude similar to CREAM).
-        individual_task_loss = torch.tensor(0.0, device=x.device)
-        for y_m in all_y:
+            # Task loss for this expert (same as CREAM)
             if self.num_classes == 1:
-                individual_task_loss = individual_task_loss + F.binary_cross_entropy_with_logits(
+                task_loss_m = F.binary_cross_entropy_with_logits(
                     y_m.squeeze(-1), y_true.float().squeeze(-1)
                 )
             else:
-                individual_task_loss = individual_task_loss + F.cross_entropy(y_m, y_true)
-        individual_task_loss = individual_task_loss / self.num_experts
+                task_loss_m = F.cross_entropy(y_m, y_true)
 
-        # Fire proxy hooks so LogIntermediateLayerCallback captures activations.
-        # This is the equivalent of CREAM calling self(x) which runs u2u_model
-        # and last_layer — here we fire them explicitly via the proxy.
+            # Concept loss for this expert (same as CREAM)
+            concept_loss_m = F.binary_cross_entropy(
+                c_m.clamp(1e-7, 1 - 1e-7), true_concepts.float()
+            )
+
+            expert_losses = expert_losses + (task_loss_m + self.lambda_weight * concept_loss_m)
+
+        # No /M here — each expert gets the full CREAM gradient (1.0), not 1/M.
+        # This is identical to training M standalone CREAM models simultaneously.
+
+        # ── Ensemble prediction ───────────────────────────────────────────────
+        logits_stack = torch.stack(all_y, dim=0)       # [M, B, T]
+        y_pred = self.ensemble(logits_stack)            # [B, T]
+        c_avg  = torch.stack(all_c, dim=0).mean(dim=0) # [B, K]
+
+        # ── Ensemble loss (CREAM loss on the combined prediction) ─────────────
+        # y_pred = mean(y_0..y_M) and c_avg = mean(c_0..c_M) — NOT detached.
+        # This means gradient flows back into each expert:
+        #   ensemble_loss → 1/M gradient to each expert
+        #
+        # Combined with expert_losses (full CREAM gradient = 1.0 per expert):
+        #   Total gradient per expert = 1.0 (own CREAM) + 1/M (ensemble feedback)
+        #
+        # The 1/M is NOT a problem here — it is bonus improvement signal on top
+        # of the full standalone CREAM gradient. Expert trains like standalone CREAM
+        # AND receives feedback from how well its prediction helped the ensemble.
+        if self.num_classes == 1:
+            task_loss_ensemble = F.binary_cross_entropy_with_logits(
+                y_pred.squeeze(-1), y_true.float().squeeze(-1)
+            )
+            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze(-1)
+        else:
+            task_loss_ensemble = F.cross_entropy(y_pred, y_true)
+            task_preds = y_pred.argmax(dim=1)
+
+        concept_loss_ensemble = F.binary_cross_entropy(
+            c_avg.clamp(1e-7, 1 - 1e-7), true_concepts.float()
+        )
+
+        ensemble_loss = task_loss_ensemble + self.lambda_weight * concept_loss_ensemble
+
+        # ── Total loss ────────────────────────────────────────────────────────
+        # = sum of M individual CREAM losses (experts behave like standalone CREAM)
+        # + one ensemble CREAM loss (final prediction is also trained like CREAM)
+        total_loss = expert_losses + ensemble_loss
+
+        # ── Fire proxy hooks for save_intermediate_values ─────────────────────
         if self.num_side_channel > 0:
             e0 = self.experts[0]
             utoy = e0 if hasattr(e0, 'u2u_model') else e0.utoy
@@ -514,31 +548,17 @@ class mCREAM_Ensemble(pl.LightningModule):
             s_avg = None
         self.u_to_CY.record(u, c_avg, s_avg)
 
-        # Task loss
-        if self.num_classes == 1:
-            task_loss = F.binary_cross_entropy_with_logits(
-                y_pred.squeeze(-1), y_true.float().squeeze(-1)
-            )
-            task_preds = (torch.sigmoid(y_pred) > 0.5).int().squeeze(-1)
-        else:
-            task_loss = F.cross_entropy(y_pred, y_true)
-            task_preds = y_pred.argmax(dim=1)
-
-        task_acc   = (task_preds == y_true.view(-1)).float().mean()
+        # ── Metrics ───────────────────────────────────────────────────────────
+        task_acc    = (task_preds == y_true.view(-1)).float().mean()
         concept_acc = ((c_avg > 0.5) == true_concepts).float().mean()
 
-        # Combined loss: ensemble task + individual task + concept
-        # ensemble task   → teaches experts to cooperate
-        # individual task → teaches each expert to be individually strong (full gradient)
-        # concept loss    → each expert predicts concepts correctly
-        total_loss = task_loss + individual_task_loss + self.lambda_weight * avg_concept_loss
-
         metrics = {
-            f"{stage}_task_loss":            task_loss.detach(),
-            f"{stage}_individual_task_loss": individual_task_loss.detach(),
-            f"{stage}_concept_loss":         avg_concept_loss.detach(),
-            f"{stage}_task_accuracy":        task_acc.detach(),
-            f"{stage}_concept_accuracy":     concept_acc.detach(),
+            f"{stage}_task_loss":         task_loss_ensemble.detach(),
+            f"{stage}_concept_loss":      concept_loss_ensemble.detach(),
+            f"{stage}_expert_losses":     expert_losses.detach(),
+            f"{stage}_ensemble_loss":     ensemble_loss.detach(),
+            f"{stage}_task_accuracy":     task_acc.detach(),
+            f"{stage}_concept_accuracy":  concept_acc.detach(),
         }
 
         return total_loss, metrics
