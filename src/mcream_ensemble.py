@@ -486,6 +486,21 @@ class mCREAM_Ensemble(pl.LightningModule):
         y_pred = self.ensemble(logits_stack)        # [B, T]
         c_avg  = torch.stack(all_c, dim=0).mean(dim=0)  # [B, K]
 
+        # Per-expert individual task loss.
+        # Each expert also minimises its OWN CrossEntropy independently,
+        # so it receives a full task gradient — not the 1/M-diluted ensemble gradient.
+        # This ensures each expert is as strong as a standalone CREAM on its noisy graph.
+        # Divided by M for scale balance (keeps total loss magnitude similar to CREAM).
+        individual_task_loss = torch.tensor(0.0, device=x.device)
+        for y_m in all_y:
+            if self.num_classes == 1:
+                individual_task_loss = individual_task_loss + F.binary_cross_entropy_with_logits(
+                    y_m.squeeze(-1), y_true.float().squeeze(-1)
+                )
+            else:
+                individual_task_loss = individual_task_loss + F.cross_entropy(y_m, y_true)
+        individual_task_loss = individual_task_loss / self.num_experts
+
         # Fire proxy hooks so LogIntermediateLayerCallback captures activations.
         # This is the equivalent of CREAM calling self(x) which runs u2u_model
         # and last_layer — here we fire them explicitly via the proxy.
@@ -512,13 +527,18 @@ class mCREAM_Ensemble(pl.LightningModule):
         task_acc   = (task_preds == y_true.view(-1)).float().mean()
         concept_acc = ((c_avg > 0.5) == true_concepts).float().mean()
 
-        total_loss = task_loss + self.lambda_weight * avg_concept_loss
+        # Combined loss: ensemble task + individual task + concept
+        # ensemble task   → teaches experts to cooperate
+        # individual task → teaches each expert to be individually strong (full gradient)
+        # concept loss    → each expert predicts concepts correctly
+        total_loss = task_loss + individual_task_loss + self.lambda_weight * avg_concept_loss
 
         metrics = {
-            f"{stage}_task_loss":        task_loss.detach(),
-            f"{stage}_concept_loss":     avg_concept_loss.detach(),
-            f"{stage}_task_accuracy":    task_acc.detach(),
-            f"{stage}_concept_accuracy": concept_acc.detach(),
+            f"{stage}_task_loss":            task_loss.detach(),
+            f"{stage}_individual_task_loss": individual_task_loss.detach(),
+            f"{stage}_concept_loss":         avg_concept_loss.detach(),
+            f"{stage}_task_accuracy":        task_acc.detach(),
+            f"{stage}_concept_accuracy":     concept_acc.detach(),
         }
 
         return total_loss, metrics
