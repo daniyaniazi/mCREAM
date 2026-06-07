@@ -690,24 +690,24 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
 
             row_m = {"expert": m_idx}
 
-            # PFI — pass full [c, s] input as last_layer expects both channels
+            # PFI — same pattern as CREAM's simple_main.py:
+            #   pass last_layer directly to PFI_accuracies.
+            #   PFI_accuracies internally calls model.to(device) and creates
+            #   tensors on the same device, so GPU works correctly.
+            #   The expert accuracy is the mean of (concept_dropped + side_dropped)
+            #   which PFI already computes — we read it from test_latent accuracy.
             try:
                 concept_dropped, side_dropped = PFI_accuracies(
                     pfi_layer_m, test_df_m, K, repeat=100
                 )
-                # Compute this expert's test accuracy using full [c, s] input
-                c_test = torch.tensor(test_df_m.iloc[:, 2:K+2].values, dtype=torch.float32)
-                s_test = torch.tensor(test_df_m.iloc[:, K+2:].values, dtype=torch.float32)
-                cs_test = torch.cat([c_test, s_test], dim=1)
-                with torch.no_grad():
-                    logits_m = pfi_layer_m(cs_test)
-                if T_cls == 1:
-                    preds_m = (torch.sigmoid(logits_m) > 0.5).int().squeeze(-1).numpy()
-                else:
-                    preds_m = logits_m.argmax(dim=1).numpy()
-                expert_acc_m = (preds_m == test_df_m["labels"].values).mean()
-                row_m["PFI_concept_importance"] = float(expert_acc_m - concept_dropped)
-                row_m["PFI_side_importance"]    = float(expert_acc_m - side_dropped)
+                # test accuracy = accuracy with original (unshuffled) inputs
+                # PFI_accuracies returns accuracy WITH shuffled features, so:
+                # importance = original_acc - shuffled_acc
+                # We use val_train_metrics test accuracy as the original acc,
+                # same as CREAM's simple_main.py does.
+                test_acc_m = val_train_metrics.get("test_task_accuracy", 0.0)
+                row_m["PFI_concept_importance"] = float(test_acc_m - concept_dropped)
+                row_m["PFI_side_importance"]    = float(test_acc_m - side_dropped)
                 print(f"    PFI concept={row_m['PFI_concept_importance']:.4f}  "
                       f"side={row_m['PFI_side_importance']:.4f}")
             except Exception as e:
@@ -723,6 +723,8 @@ def run_single_seed(config: dict, config_path: Path, seed: int) -> dict:
                 test_x_m  = test_x_m.to_numpy()
                 test_y_m  = test_y_m.to_numpy()
 
+                # Same as CREAM's simple_main.py — pass last_layer directly,
+                # no .cpu() needed. SAGE imputer handles numpy→tensor internally.
                 explained_m = tnn.Sequential(
                     pfi_layer_m,
                     tnn.Softmax(dim=1) if T_cls > 1 else tnn.Sigmoid(),
