@@ -1,0 +1,49 @@
+# mCREAM Ensemble NO SIDE CHANNEL - celeba - weighted deletion high
+mode: train_cbm
+seed: 42
+seeds: [42, 7, 1, 134, 89]
+dataset_name: CelebA
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: true
+  return_images: true
+  class_name: unfair
+
+backbone_model: Standard_CelebA
+
+multi_expert:
+  num_experts: 5
+  expert_mode: hard
+  ensemble_type: weighted
+  noise_type: single_action
+  action: deletion
+  noise_level: high
+
+hyperparameters_model2:
+  num_classes: 1
+  num_concepts: 7
+  num_exogenous: 14
+  num_side_channel: 0
+  concept_representation: soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  side_dropout: false
+  dropout_prob: 0.1
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 20
+
+experiment_name: ensemble_no_side_weighted_deletion_high
+
+paths:
+  default_root_dir: ./experiments/
+  DAG_file: ./data/CelebA/final_DAG_unfair.csv
+  expert_graphs_dir: ./data/CelebA/expert_graphs/ensemble/deletion_high/
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
