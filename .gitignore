@@ -14,3 +14,4 @@ pretrained_models/
 logs*/
 Miniconda*.sh
 .env
+*.png
