@@ -648,7 +648,8 @@ class mCREAM_Ensemble(pl.LightningModule):
         with torch.no_grad():
             for batch in dataloader:
                 x, true_concepts, y_true = batch
-                x, y_true = x.to(device), y_true.to(device)
+                x, y_true        = x.to(device), y_true.to(device)
+                true_concepts     = true_concepts.to(device)
 
                 u = self.backbone.concept_extractor(x)
 
@@ -672,23 +673,36 @@ class mCREAM_Ensemble(pl.LightningModule):
 
                 y_true_flat = y_true.view(-1)
 
+                # Per-expert concept accuracy: (c_m > 0.5) == true_concepts
+                # Shape: [M, B, K] → [M, B] mean over K concepts
+                concepts_stack  = torch.stack(all_c, dim=0)              # [M, B, K]
+                c_correct_stack = ((concepts_stack > 0.5) ==
+                                   true_concepts.unsqueeze(0).bool())     # [M, B, K]
+                c_acc_stack     = c_correct_stack.float().mean(dim=2)     # [M, B]
+
+                # Ensemble concept accuracy
+                c_avg = concepts_stack.mean(dim=0)                        # [B, K]
+                ens_c_correct = ((c_avg > 0.5) == true_concepts.bool()).float().mean(dim=1)  # [B]
+
                 B = x.size(0)
                 for i in range(B):
                     row = {
-                        "y_true": y_true_flat[i].item(),
-                        "y_ensemble": ensemble_pred[i].item(),
-                        "ensemble_correct": (ensemble_pred[i] == y_true_flat[i]).item(),
+                        "y_true":            y_true_flat[i].item(),
+                        "y_ensemble":        ensemble_pred[i].item(),
+                        "ensemble_correct":  (ensemble_pred[i] == y_true_flat[i]).item(),
+                        "ensemble_concept_accuracy": ens_c_correct[i].item(),
                     }
                     for m in range(self.num_experts):
                         if self.num_classes == 1:
                             pred_m = (torch.sigmoid(logits_stack[m, i]) > 0.5).int().item()
                         else:
                             pred_m = logits_stack[m, i].argmax().item()
-                        row[f"y_{m}_pred"] = pred_m
-                        row[f"y_{m}_correct"] = (pred_m == y_true_flat[i].item())
+                        row[f"y_{m}_pred"]               = pred_m
+                        row[f"y_{m}_correct"]            = (pred_m == y_true_flat[i].item())
+                        row[f"c_{m}_accuracy"]           = c_acc_stack[m, i].item()
                         for t in range(self.num_classes):
                             row[f"y_{m}_logit_{t}"] = logits_stack[m, i, t].item()
-                            row[f"y_{m}_prob_{t}"] = probs_stack[m, i, t].item()
+                            row[f"y_{m}_prob_{t}"]  = probs_stack[m, i, t].item()
                     rows.append(row)
 
         return pd.DataFrame(rows)
