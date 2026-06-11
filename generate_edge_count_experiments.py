@@ -114,15 +114,13 @@ def generate_for_dataset(dataset_key: str, n_seeds: int = 5):
 
     # Which block to vary
     if cfg['graph_type'] == 'u2c':
-        # u2c: rows 0..K-1, cols 0..K-1 (square, no diagonal)
-        block_rows = slice(0, K)
-        block_cols = slice(0, K)
-        # Existing and absent positions (exclude diagonal — no self-loops)
+        # u2c: rows 0..K-1, cols 0..K-1 — include ALL entries (diagonal included)
+        # GT has 17 edges (11 self-loops + 6 causal). We perturb all of them.
         existing = [(r, c) for r in range(K) for c in range(K)
-                    if r != c and gt_vals[r, c] == 1]
+                    if gt_vals[r, c] == 1]
         absent   = [(r, c) for r in range(K) for c in range(K)
-                    if r != c and gt_vals[r, c] == 0]
-        gt_count = len(existing)
+                    if gt_vals[r, c] == 0]
+        gt_count = len(existing)   # = 17 for cfmnist
     else:
         # c2y: rows K..K+T, cols 0..K
         existing = [(K+t, c) for t in range(T) for c in range(K)
@@ -225,24 +223,37 @@ def main():
                         help='Random seeds per edge count (default: 5 → boxplot)')
     parser.add_argument('--delta', type=int, default=5,
                         help='Range around GT: GT-delta to GT+delta (default: 5)')
+    parser.add_argument('--graph_type', choices=['u2c', 'c2y', 'both'], default='u2c',
+                        help='Which graph block to perturb: u2c, c2y, or both (default: u2c)')
     args = parser.parse_args()
 
     datasets = list(DATASETS.keys()) if args.dataset == 'all' else [args.dataset]
 
     # Override target_counts using delta — computed from actual GT edge count
+    graph_types = ['u2c', 'c2y'] if args.graph_type == 'both' else [args.graph_type]
+
     for ds_key in datasets:
         cfg = DATASETS[ds_key]
         gt_df = pd.read_csv(cfg['dag'], index_col=0)
         K = cfg['num_concepts']
+        T = cfg['num_classes']
         gt_vals = (gt_df.values != 0).astype(int)
-        # u2c edges (no diagonal)
-        gt_count = sum(1 for r in range(K) for c in range(K)
-                       if r != c and gt_vals[r, c] == 1)
-        cfg['target_counts'] = list(range(
-            max(0, gt_count - args.delta),
-            gt_count + args.delta + 1
-        ))
-        print(f'{ds_key}: GT u2c edges = {gt_count}  range {cfg["target_counts"]}')
+
+        for gtype in graph_types:
+            cfg_copy = dict(cfg)
+            cfg_copy['graph_type'] = gtype
+            if gtype == 'u2c':
+                gt_count = sum(1 for r in range(K) for c in range(K)
+                               if gt_vals[r, c] == 1)
+            else:  # c2y
+                gt_count = sum(1 for t in range(T) for c in range(K)
+                               if gt_vals[K+t, c] == 1)
+            cfg_copy['target_counts'] = list(range(
+                max(0, gt_count - args.delta),
+                gt_count + args.delta + 1
+            ))
+            DATASETS[ds_key] = cfg_copy
+            print(f'{ds_key} {gtype}: GT edges = {gt_count}  range {cfg_copy["target_counts"]}')
 
     total = 0
     for ds in datasets:
