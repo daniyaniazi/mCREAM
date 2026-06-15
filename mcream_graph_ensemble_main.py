@@ -245,9 +245,10 @@ def run_single_seed(config, config_path, seed):
                 if torch.cuda.is_available():
                     x, true_concepts, y_true = x.cuda(), true_concepts.cuda(), y_true.cuda()
                     model = model.cuda()
+                # Use concept_extractor directly — same as mCREAM_GraphEnsemble.forward
+                features = model.x_to_u.concept_extractor(x)   # [B, 128]
                 y_pred, c_pred = model.u_to_CY.forward_with_interventions(
-                    model.x_to_u(x) if hasattr(model, 'x_to_u') else model.u_to_CY.u2u_model(model.backbone.concept_extractor(x)),
-                    true_concepts, n_interv
+                    features, true_concepts, n_interv
                 )
                 if T == 1:
                     task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
