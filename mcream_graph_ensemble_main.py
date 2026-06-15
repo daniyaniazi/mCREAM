@@ -73,7 +73,45 @@ def load_or_generate_expert_graphs(config):
     seed        = config.get("seed", 42)
     noise_type  = me.get("noise_type", "single_action")
 
-    if noise_type == "single_action":
+    if noise_type == "single_edge_perturbation":
+        # ALL M experts use the SAME single-edge perturbed graph (dag_path).
+        # Same as standalone CREAM single-edge perturbation, but with M experts.
+        # Direct comparison: CREAM vs GraphEnsemble on identical graph error.
+        #
+        # dag_path = the perturbed DAG (e.g. del_edge_Tops_Clothes.csv)
+        # gt_dag_file = original GT DAG for reference/corruption stats
+        gt_dag = config["paths"].get("gt_dag_file",
+                 "data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv")
+        u2c_perturbed, c2y_perturbed = load_and_split_dag(dag_path, num_classes)
+        u2c_star, c2y_star           = load_and_split_dag(gt_dag,   num_classes)
+
+        # All M experts see the same perturbed graph
+        expert_u2c = [u2c_perturbed.clone() for _ in range(M)]
+        expert_c2y = [c2y_perturbed.clone() for _ in range(M)]
+
+        save_cfg = {"dag_path": str(dag_path), "noise_type": "single_edge_perturbation",
+                    "num_experts": M, "seed": seed}
+        save_expert_graphs(expert_u2c, expert_c2y, expert_dir, save_cfg)
+        return expert_u2c, expert_c2y, u2c_star, c2y_star
+
+    elif noise_type == "edge_count_multi_seed":
+        # Each expert gets a different seed's graph — all with the same edge count.
+        # expert_dag_files: list of M DAG CSV paths (one per seed/expert).
+        expert_dag_files = me.get("expert_dag_files", [])
+        if not expert_dag_files:
+            raise ValueError("edge_count_multi_seed requires expert_dag_files list in config")
+        expert_u2c, expert_c2y = [], []
+        for dag_f in expert_dag_files[:M]:
+            u2c_m, c2y_m = load_and_split_dag(dag_f, num_classes)
+            expert_u2c.append(u2c_m)
+            expert_c2y.append(c2y_m)
+        u2c_star, c2y_star = load_and_split_dag(dag_path, num_classes)
+        save_cfg = {"dag_path": str(dag_path), "noise_type": "edge_count_multi_seed",
+                    "num_experts": len(expert_u2c), "seed": seed}
+        save_expert_graphs(expert_u2c, expert_c2y, expert_dir, save_cfg)
+        return expert_u2c, expert_c2y, u2c_star, c2y_star
+
+    elif noise_type == "single_action":
         action = me.get("action", "deletion")
         level  = me.get("noise_level", "medium")
         expert_u2c, expert_c2y, u2c_star, c2y_star = generate_single_action_experts(
@@ -294,6 +332,9 @@ def run_single_seed(config, config_path, seed):
         **{k: v for d in expert_corruption_stats for k, v in d.items()},
         "intervention_acc_0":   intervention_results[0]["test_task_accuracy"],
         "intervention_acc_max": intervention_results[-1]["test_task_accuracy"],
+        # Learned λ_m weights per expert (Kavya: multi-task learning style)
+        **{f"lambda_{m}": model.u_to_CY.expert_weights[m].item()
+           for m in range(M)},
     }
 
     pl_checkpoint_path = Path(trainer.logger.log_dir)
