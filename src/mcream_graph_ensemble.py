@@ -93,6 +93,14 @@ class UtoY_MultiGraph(UtoY_model):
             for g in expert_graphs
         ])
 
+        # Learnable per-expert concept loss weights λ_m (Kavya: multi-task learning style)
+        # Initialised to 1/M so total concept weight matches lambda_weight at start.
+        # Trained end-to-end: experts whose concepts are harder to learn get higher λ.
+        # Softmax ensures weights sum to 1 and stay positive.
+        self._lambda_logits = nn.Parameter(
+            torch.zeros(self.num_experts)   # softmax → uniform 1/M initially
+        )
+
     def _build_u2c_from_graph(
         self,
         full_graph: BoolTensor,
@@ -147,6 +155,11 @@ class UtoY_MultiGraph(UtoY_model):
             y = self.last_layer(c)
 
         return y, c
+
+    @property
+    def expert_weights(self):
+        """Return learned λ_m weights for each expert (after softmax)."""
+        return torch.softmax(self._lambda_logits, dim=0).detach()
 
     # ── Interventions — inherited logic, but uses averaged c ─────────────────
 
@@ -225,24 +238,28 @@ class UtoY_MultiGraph(UtoY_model):
         u  = self.u2u_model(x)
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
 
+        # Learnable per-expert weights λ_m (Kavya: multi-task learning style)
+        # softmax → sum to 1, always positive
+        lambdas = torch.softmax(self._lambda_logits, dim=0)   # [M]
+
         all_c_m = []
         per_expert_concept_loss = torch.tensor(0.0, device=x.device)
-        for u2c_m in self.u2c_models:
+        for m_idx, u2c_m in enumerate(self.u2c_models):
             c_m = self.concept_activation_function(u2c_m(Uc))
             all_c_m.append(c_m)
-            # Each expert supervised individually — full gradient (no /M)
-            per_expert_concept_loss = per_expert_concept_loss + F.binary_cross_entropy(
+            # λ_m · BCE(c_m, c_true)  — weighted per-expert supervision
+            bce_m = F.binary_cross_entropy(
                 c_m.clamp(1e-7, 1 - 1e-7), target_concepts.float()
             )
+            per_expert_concept_loss = per_expert_concept_loss + lambdas[m_idx] * bce_m
 
-        # Also supervise the aggregated c_avg that actually goes into last_layer.
-        # c_avg might be uncertain even if individual experts are confident
-        # (e.g. expert 0 says 0.9, expert 1 says 0.1 → avg=0.5 which is wrong).
+        # Also supervise c_avg (the vector that actually enters last_layer)
         c_avg_supervised = torch.stack(all_c_m, dim=0).mean(dim=0)
         ensemble_concept_loss = F.binary_cross_entropy(
             c_avg_supervised.clamp(1e-7, 1 - 1e-7), target_concepts.float()
         )
-        # Total concept loss: M individual + 1 ensemble
+        # Final concept loss = weighted individual + ensemble
+        # concept_loss = Σ_m λ_m·BCE(c_m) + BCE(c_avg)
         per_expert_concept_loss = per_expert_concept_loss + ensemble_concept_loss
 
         # ── Task loss ─────────────────────────────────────────────────────────
