@@ -339,11 +339,12 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
 
     def forward(self, x: Tensor) -> tuple:
         """
-        Identical to Template_CBM_MultiClass.forward.
-        x_to_u = backbone — for FashionMNIST this is concept_extractor output [B, 128]
-        because backbone is loaded frozen and its forward returns concept_extractor(x).
+        Uses backbone.concept_extractor(x) directly to get [B, 128] features.
+        FashionMNIST_for_CBM.forward() goes through the classifier and returns
+        [B, 10] logits which would crash u2u_model = Linear(128, 128).
+        Using concept_extractor directly matches previous_model_output_size=128.
         """
-        exogenous_variables = self.x_to_u(x)   # same as CREAM
+        exogenous_variables = self.x_to_u.concept_extractor(x)  # [B, 128]
         y, c = self.u_to_CY(exogenous_variables)
         return y, c
 
