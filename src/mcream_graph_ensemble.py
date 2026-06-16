@@ -94,11 +94,11 @@ class UtoY_MultiGraph(UtoY_model):
         ])
 
         # Learnable per-expert concept loss weights λ_m (Kavya: multi-task learning style)
-        # Initialised to 1/M so total concept weight matches lambda_weight at start.
-        # Trained end-to-end: experts whose concepts are harder to learn get higher λ.
+        # Random init breaks symmetry so gradients can differentiate experts.
         # Softmax ensures weights sum to 1 and stay positive.
+        # Using small random noise: experts start near-uniform but can diverge.
         self._lambda_logits = nn.Parameter(
-            torch.zeros(self.num_experts)   # softmax → uniform 1/M initially
+            torch.randn(self.num_experts) * 0.1   # small random, softmax → near-uniform
         )
 
     def _build_u2c_from_graph(

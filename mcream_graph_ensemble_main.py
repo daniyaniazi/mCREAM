@@ -271,6 +271,21 @@ def run_single_seed(config, config_path, seed):
     )
 
     # Intervention curve
+    # Use activation percentiles for soft concept representations
+    from src.saving_intermediate_utils import save_activation_percentiles
+    concept_rep = config["hyperparameters_model2"].get("concept_representation", "soft")
+    intervention_percentile_df = None
+    if concept_rep in ("soft", "group_soft", "logits"):
+        try:
+            intervention_percentile_df = save_activation_percentiles(
+                dataset=dataset, dataset_name=dataset_name, model=model,
+                DAG_path=config["paths"]["DAG_file"],
+            )
+            if intervention_percentile_df is None or len(intervention_percentile_df) != K:
+                intervention_percentile_df = None
+        except Exception as e:
+            print(f"  Percentile computation failed: {e} — using hard 0/1 targets")
+
     print("Running interventions...")
     intervention_results = []
     for n_interv in range(K + 1):
@@ -283,10 +298,19 @@ def run_single_seed(config, config_path, seed):
                 if torch.cuda.is_available():
                     x, true_concepts, y_true = x.cuda(), true_concepts.cuda(), y_true.cuda()
                     model = model.cuda()
-                # Use concept_extractor directly — same as mCREAM_GraphEnsemble.forward
+
+                # Scale intervention targets to activation range (avoids softmax violation)
+                interv_concepts = true_concepts.float()
+                if intervention_percentile_df is not None:
+                    p5  = torch.tensor(intervention_percentile_df["5th_percentile"].values,
+                                       device=x.device, dtype=x.dtype)
+                    p95 = torch.tensor(intervention_percentile_df["95th_percentile"].values,
+                                       device=x.device, dtype=x.dtype)
+                    interv_concepts = true_concepts.float() * p95 + (1 - true_concepts.float()) * p5
+
                 features = model.x_to_u.concept_extractor(x)   # [B, 128]
                 y_pred, c_pred = model.u_to_CY.forward_with_interventions(
-                    features, true_concepts, n_interv
+                    features, interv_concepts, n_interv
                 )
                 if T == 1:
                     task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
@@ -303,6 +327,72 @@ def run_single_seed(config, config_path, seed):
 
     pd.DataFrame(intervention_results).to_csv(
         Path(pl_checkpoint_path) / "intervention_results.csv", index=False)
+
+    # ── PFI + SAGE/CCI ────────────────────────────────────────────────────────
+    results_pfi = {}
+    num_side = config["hyperparameters_model2"].get("num_side_channel", 0)
+    if num_side > 0:
+        from src.PFI_accuracy import PFI_accuracies
+        from src.sage_importance_functions import prepare_shap_data, group_importance_metric
+        from src.diff_permutation_estimator import PermutationEstimator as my_PermutationEstimator
+        import sage as sage_lib
+        import torch.nn as tnn
+        from src.utils import timeout
+
+        class LastLayerWrap(tnn.Module):
+            def __init__(self, layer): super().__init__(); self.layer = layer
+            def forward(self, x): return self.layer(x)
+
+        pfi_layer = LastLayerWrap(model.u_to_CY.last_layer)
+
+        print("\nComputing PFI...")
+        try:
+            concept_dropped, side_dropped = PFI_accuracies(
+                pfi_layer, test_latent[0], K, repeat=100
+            )
+            test_acc = val_train_metrics.get("test_task_accuracy", 0.0)
+            results_pfi["PFI_concept_importance"] = float(test_acc - concept_dropped)
+            results_pfi["PFI_side_importance"]    = float(test_acc - side_dropped)
+            print(f"  PFI concept={results_pfi['PFI_concept_importance']:.4f}  side={results_pfi['PFI_side_importance']:.4f}")
+        except Exception as e:
+            print(f"  PFI failed: {e}")
+
+        print("\nComputing SAGE/CCI (1hr timeout)...")
+        try:
+            train_x, _, grp_names, grp_idx = prepare_shap_data(train_latent[1])
+            test_x, test_y, _, _           = prepare_shap_data(test_latent[1])
+            train_x, test_x, test_y = train_x.to_numpy(), test_x.to_numpy(), test_y.to_numpy()
+
+            T_cls = config["hyperparameters_model2"]["num_classes"]
+            explained = tnn.Sequential(
+                pfi_layer,
+                tnn.Softmax(dim=1) if T_cls > 1 else tnn.Sigmoid(),
+            )
+            twenty = int(len(train_latent[1]) * 0.2)
+            imputer = sage_lib.GroupedMarginalImputer(explained, train_x[:twenty], grp_idx)
+            estimator = my_PermutationEstimator(
+                imputer, "cross entropy", random_state=seed,
+                n_jobs=config.get("dataset_params", {}).get("num_workers", 4)
+            )
+
+            @timeout(3600)
+            def run_sage():
+                return estimator(
+                    test_x, test_y,
+                    batch_size=config.get("dataset_params", {}).get("batch_size", 128),
+                    thresh=0.05, bar=False,
+                )
+
+            sv = run_sage()
+            expl = dict(zip(grp_names, sv.values))
+            cci  = group_importance_metric(expl)
+            results_pfi["CCI"]                              = float(cci)
+            results_pfi["debugging_sage_metrics_concepts"]  = expl.get("concepts")
+            results_pfi["debugging_sage_metrics_side"]      = expl.get("side_channel")
+            print(f"  CCI={cci:.4f}")
+        except Exception as e:
+            print(f"  SAGE/CCI failed: {e}")
+            results_pfi["CCI"] = None
 
     # Per-expert corruption stats
     expert_corruption_stats = []
@@ -332,9 +422,10 @@ def run_single_seed(config, config_path, seed):
         **{k: v for d in expert_corruption_stats for k, v in d.items()},
         "intervention_acc_0":   intervention_results[0]["test_task_accuracy"],
         "intervention_acc_max": intervention_results[-1]["test_task_accuracy"],
-        # Learned λ_m weights per expert (Kavya: multi-task learning style)
-        **{f"lambda_{m}": model.u_to_CY.expert_weights[m].item()
-           for m in range(M)},
+        # Learned λ_m weights per expert
+        **{f"lambda_{m}": model.u_to_CY.expert_weights[m].item() for m in range(M)},
+        # PFI + CCI
+        **results_pfi,
     }
 
     pl_checkpoint_path = Path(trainer.logger.log_dir)
