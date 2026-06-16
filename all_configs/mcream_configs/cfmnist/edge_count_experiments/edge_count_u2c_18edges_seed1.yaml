@@ -37,6 +37,6 @@ trainer_param:
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/
-  DAG_file: ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed1.csv
+  DAG_file: ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed1.csv
   input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
   softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
