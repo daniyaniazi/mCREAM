@@ -94,6 +94,27 @@ def load_or_generate_expert_graphs(config):
         save_expert_graphs(expert_u2c, expert_c2y, expert_dir, save_cfg)
         return expert_u2c, expert_c2y, u2c_star, c2y_star
 
+    elif noise_type == "mixed_noise_levels":
+        # Each expert gets a graph from a DIFFERENT noise level directory.
+        # e.g. expert_0=low, expert_1=medium, expert_2=high, expert_3=low, expert_4=high
+        # → experts have meaningfully different BCE values → λ can learn
+        # Config specifies expert_graph_paths: list of (dir, expert_idx) pairs
+        expert_graph_paths = me.get("expert_graph_paths", [])
+        if not expert_graph_paths:
+            raise ValueError("mixed_noise_levels requires expert_graph_paths list")
+        expert_u2c, expert_c2y = [], []
+        for entry in expert_graph_paths[:M]:
+            graph_dir   = Path(entry["dir"])
+            expert_idx  = entry.get("expert_idx", 0)
+            u2c_f = graph_dir / "u2c" / f"expert_{expert_idx}.pt"
+            c2y_f = graph_dir / "c2y" / f"expert_{expert_idx}.pt"
+            expert_u2c.append(torch.load(u2c_f, weights_only=True).float())
+            expert_c2y.append(torch.load(c2y_f, weights_only=True).float())
+        u2c_star, c2y_star = load_and_split_dag(dag_path, num_classes)
+        save_cfg = {"noise_type": "mixed_noise_levels", "num_experts": len(expert_u2c)}
+        save_expert_graphs(expert_u2c, expert_c2y, expert_dir, save_cfg)
+        return expert_u2c, expert_c2y, u2c_star, c2y_star
+
     elif noise_type == "edge_count_multi_seed":
         # Each expert gets a different seed's graph — all with the same edge count.
         # expert_dag_files: list of M DAG CSV paths (one per seed/expert).
