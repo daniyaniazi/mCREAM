@@ -203,7 +203,7 @@ def generate_for_dataset(dataset_key: str, n_seeds: int = 5):
                 concept_rep=cfg['concept_rep'],
                 dropout=cfg['dropout'],
                 max_epochs=cfg['max_epochs'],
-                dag_file=f'./{dag_save}',
+                dag_file='./' + str(dag_save).replace('\\', '/'),
                 ckpt=cfg['ckpt'],
                 softmax_line=softmax_line,
             )

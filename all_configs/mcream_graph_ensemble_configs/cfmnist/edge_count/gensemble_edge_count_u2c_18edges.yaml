@@ -18,11 +18,11 @@ multi_expert:
   num_experts: 5
   noise_type: edge_count_multi_seed
   expert_dag_files:
-    - ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed0.csv
-    - ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed1.csv
-    - ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed2.csv
-    - ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed3.csv
-    - ./data\FashionMNIST\edge_count_experiments\edge_count_u2c_18edges_seed4.csv
+    - ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed0.csv
+    - ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed1.csv
+    - ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed2.csv
+    - ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed3.csv
+    - ./data/FashionMNIST/edge_count_experiments/edge_count_u2c_18edges_seed4.csv
 
 hyperparameters_model2:
   num_classes: 10

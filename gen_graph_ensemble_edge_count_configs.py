@@ -93,7 +93,10 @@ count_written = 0
 for (gtype, n_edges), seed_dags in sorted(groups.items()):
     seed_dags_sorted = sorted(seed_dags, key=lambda x: x[0])  # sort by seed
     M = len(seed_dags_sorted)
-    dag_lines = '\n'.join(f'    - ./{d.lstrip("./")}' for _, d in seed_dags_sorted)
+    dag_lines = '\n'.join(
+        f'    - ./{d.lstrip("./").replace(chr(92), "/")}'
+        for _, d in seed_dags_sorted
+    )
 
     content = CONFIG_TEMPLATE.format(
         graph_type=gtype,
