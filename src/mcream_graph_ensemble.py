@@ -355,13 +355,28 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         )
 
     def forward(self, x: Tensor) -> tuple:
-        """
-        Uses backbone.concept_extractor(x) directly to get [B, 128] features.
-        FashionMNIST_for_CBM.forward() goes through the classifier and returns
-        [B, 10] logits which would crash u2u_model = Linear(128, 128).
-        Using concept_extractor directly matches previous_model_output_size=128.
-        """
+        """Uses backbone.concept_extractor(x) → [B, 128] features."""
         exogenous_variables = self.x_to_u.concept_extractor(x)  # [B, 128]
         y, c = self.u_to_CY(exogenous_variables)
         return y, c
+
+    def forward_with_interventions_cbm(
+        self, x: Tensor, true_concepts: Tensor, y: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """
+        Override Template_CBM_MultiClass.forward_with_interventions_cbm.
+        Uses concept_extractor (not full backbone forward) to get [B, 128].
+        Converts hard 0/1 interventions to soft using stored percentile_df.
+        """
+        features = self.x_to_u.concept_extractor(x)  # [B, 128]
+
+        if self.u_to_CY.concept_representation not in ("hard", "group_hard"):
+            true_concepts = self._convert_hard_interventions_to_soft(true_concepts)
+
+        y_pred, c = self.u_to_CY.forward_with_interventions(
+            x=features,
+            true_concepts=true_concepts,
+            num_interventions=self.num_interventions,
+        )
+        return y_pred, c
 

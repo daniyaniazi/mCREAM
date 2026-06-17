@@ -291,60 +291,58 @@ def run_single_seed(config, config_path, seed):
         seed=seed, save_directory=pl_checkpoint_path,
     )
 
-    # Intervention curve
-    # Use activation percentiles for soft concept representations
+    # ── Intervention curve — mirrors CREAM's simple_main.py exactly ─────────
+    # CREAM sets model.intervention_percentile_df then calls trainer.test()
+    # for each num_interventions. We do the same so the percentile scaling
+    # and group_interventions logic are handled by the inherited CREAM code.
     from src.saving_intermediate_utils import save_activation_percentiles
+    from json import load as json_load
+
     concept_rep = config["hyperparameters_model2"].get("concept_representation", "soft")
-    intervention_percentile_df = None
     if concept_rep in ("soft", "group_soft", "logits"):
-        try:
-            intervention_percentile_df = save_activation_percentiles(
-                dataset=dataset, dataset_name=dataset_name, model=model,
-                DAG_path=config["paths"]["DAG_file"],
-            )
-            if intervention_percentile_df is None or len(intervention_percentile_df) != K:
-                intervention_percentile_df = None
-        except Exception as e:
-            print(f"  Percentile computation failed: {e} — using hard 0/1 targets")
+        intervention_percentile_df = save_activation_percentiles(
+            dataset=dataset, dataset_name=dataset_name, model=model,
+            DAG_path=config["paths"]["DAG_file"],
+        )
+        model.u_to_CY.intervention_percentile_df = intervention_percentile_df
 
     print("Running interventions...")
     intervention_results = []
-    for n_interv in range(K + 1):
-        model.eval()
-        all_task, all_concept = [], []
-        dataset.setup(stage="test")
-        with torch.no_grad():
-            for batch in dataset.test_dataloader():
-                x, true_concepts, y_true = batch
-                if torch.cuda.is_available():
-                    x, true_concepts, y_true = x.cuda(), true_concepts.cuda(), y_true.cuda()
-                    model = model.cuda()
+    interv_trainer = pl.Trainer(
+        max_epochs=config["trainer_param"]["max_epochs"],
+        default_root_dir=default_root_dir,
+        enable_progress_bar=False,
+        deterministic=True,
+        logger=False,
+    )
 
-                # Scale intervention targets to activation range (avoids softmax violation)
-                interv_concepts = true_concepts.float()
-                if intervention_percentile_df is not None:
-                    p5  = torch.tensor(intervention_percentile_df["5th_percentile"].values,
-                                       device=x.device, dtype=x.dtype)
-                    p95 = torch.tensor(intervention_percentile_df["95th_percentile"].values,
-                                       device=x.device, dtype=x.dtype)
-                    interv_concepts = true_concepts.float() * p95 + (1 - true_concepts.float()) * p5
+    for group_interventions in (True, False):
+        if group_interventions is True and "softmax_mask" in config["paths"]:
+            with open(config["paths"]["softmax_mask"], "r") as f:
+                softmax_mask = json_load(f)
+            total_interventions = len(softmax_mask)
+        elif group_interventions is True:
+            continue  # no softmax_mask → skip group interventions
+        else:
+            total_interventions = K
 
-                features = model.x_to_u.concept_extractor(x)   # [B, 128]
-                y_pred, c_pred = model.u_to_CY.forward_with_interventions(
-                    features, interv_concepts, n_interv
-                )
-                if T == 1:
-                    task_preds = (torch.sigmoid(y_pred) > 0.5).int().view(-1)
-                else:
-                    task_preds = y_pred.argmax(dim=1)
-                all_task.append((task_preds == y_true.view(-1)).float())
-                all_concept.append(((c_pred > 0.5) == true_concepts).float().mean(dim=1))
-        intervention_results.append({
-            "num_interventions": n_interv,
-            "test_task_accuracy": torch.cat(all_task).mean().item(),
-            "test_concept_accuracy": torch.cat(all_concept).mean().item(),
-        })
-        print(f"    n={n_interv}: acc={intervention_results[-1]['test_task_accuracy']:.4f}")
+        model.u_to_CY.group_interventions = group_interventions
+
+        for n_interv in range(total_interventions + 1):
+            model.num_interventions = n_interv
+            model.interventions     = True
+            interv_trainer.test(model, dataloaders=dataset, verbose=False)
+            test_metrics = {k: v.item() for k, v in interv_trainer.callback_metrics.items()}
+            intervention_results.append({
+                "group_interventions": group_interventions,
+                "num_interventions":   n_interv,
+                "test_task_accuracy":  test_metrics.get("test_task_accuracy", float("nan")),
+                "test_concept_accuracy": test_metrics.get("test_concept_accuracy", float("nan")),
+            })
+            print(f"    group={group_interventions} n={n_interv}: "
+                  f"acc={intervention_results[-1]['test_task_accuracy']:.4f}")
+
+    model.interventions = False
 
     pd.DataFrame(intervention_results).to_csv(
         Path(pl_checkpoint_path) / "intervention_results.csv", index=False)
