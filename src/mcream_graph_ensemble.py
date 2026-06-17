@@ -327,6 +327,11 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         if frozen_backbone:
             freeze_model(backbone)
 
+        # CREAM passes concept_extractor directly as model1 (not full backbone).
+        # concept_extractor(x) → [B, 128]  (matches previous_model_output_size=128)
+        # backbone.forward(x) → [B, 10]    (through classifier — WRONG for u2u_model)
+        concept_extractor = backbone.concept_extractor
+
         u_to_CY = UtoY_MultiGraph(
             expert_graphs=expert_graphs,
             ref_graph=ref_graph,
@@ -345,7 +350,7 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         )
 
         super().__init__(
-            model1=backbone,
+            model1=concept_extractor,   # same as CREAM: passes concept_extractor not full backbone
             model2=u_to_CY,
             num_exogenous=num_exogenous,
             num_classes=num_classes,
@@ -354,29 +359,10 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
             learning_rate=learning_rate,
         )
 
-    def forward(self, x: Tensor) -> tuple:
-        """Uses backbone.concept_extractor(x) → [B, 128] features."""
-        exogenous_variables = self.x_to_u.concept_extractor(x)  # [B, 128]
-        y, c = self.u_to_CY(exogenous_variables)
-        return y, c
-
-    def forward_with_interventions_cbm(
-        self, x: Tensor, true_concepts: Tensor, y: Tensor
-    ) -> tuple[Tensor, Tensor]:
-        """
-        Override Template_CBM_MultiClass.forward_with_interventions_cbm.
-        Uses concept_extractor (not full backbone forward) to get [B, 128].
-        Converts hard 0/1 interventions to soft using stored percentile_df.
-        """
-        features = self.x_to_u.concept_extractor(x)  # [B, 128]
-
-        if self.u_to_CY.concept_representation not in ("hard", "group_hard"):
-            true_concepts = self._convert_hard_interventions_to_soft(true_concepts)
-
-        y_pred, c = self.u_to_CY.forward_with_interventions(
-            x=features,
-            true_concepts=true_concepts,
-            num_interventions=self.num_interventions,
-        )
-        return y_pred, c
+    # forward() and forward_with_interventions_cbm() are NOT overridden here.
+    # Template_CBM_MultiClass.forward() calls self.x_to_u(x) which is now
+    # concept_extractor (nn.Sequential) → returns [B, 128] directly.
+    # This is identical to how CREAM works in simple_main.py.
+    # All intervention logic (percentile scaling, group interventions) is
+    # inherited unchanged from Template_CBM_MultiClass.
 

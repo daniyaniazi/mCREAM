@@ -300,11 +300,21 @@ def run_single_seed(config, config_path, seed):
 
     concept_rep = config["hyperparameters_model2"].get("concept_representation", "soft")
     if concept_rep in ("soft", "group_soft", "logits"):
-        intervention_percentile_df = save_activation_percentiles(
-            dataset=dataset, dataset_name=dataset_name, model=model,
-            DAG_path=config["paths"]["DAG_file"],
-        )
-        model.u_to_CY.intervention_percentile_df = intervention_percentile_df
+        try:
+            intervention_percentile_df = save_activation_percentiles(
+                dataset=dataset, dataset_name=dataset_name, model=model,
+                DAG_path=config["paths"]["DAG_file"],
+            )
+            # Only store if valid — has correct columns and K rows
+            if (intervention_percentile_df is not None
+                    and len(intervention_percentile_df) == K
+                    and "5th_percentile" in intervention_percentile_df.columns):
+                model.intervention_percentile_df = intervention_percentile_df
+                print(f"  Percentile scaling enabled ({K} concepts)")
+            else:
+                print("  Percentile df invalid — interventions will use hard 0/1 targets")
+        except Exception as e:
+            print(f"  Percentile computation failed: {e} — using hard 0/1 targets")
 
     print("Running interventions...")
     intervention_results = []
