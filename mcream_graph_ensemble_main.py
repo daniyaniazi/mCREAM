@@ -305,14 +305,41 @@ def run_single_seed(config, config_path, seed):
                 dataset=dataset, dataset_name=dataset_name, model=model,
                 DAG_path=config["paths"]["DAG_file"],
             )
+            print(f"  Percentile df: {type(intervention_percentile_df)}, "
+                  f"len={len(intervention_percentile_df) if intervention_percentile_df is not None else 'None'}, "
+                  f"cols={list(intervention_percentile_df.columns) if intervention_percentile_df is not None and len(intervention_percentile_df)>0 else 'empty'}")
             # Only store if valid — has correct columns and K rows
             if (intervention_percentile_df is not None
                     and len(intervention_percentile_df) == K
                     and "5th_percentile" in intervention_percentile_df.columns):
                 model.intervention_percentile_df = intervention_percentile_df
-                print(f"  Percentile scaling enabled ({K} concepts)")
+                print(f"  Percentile scaling ENABLED ({K} concepts, "
+                      f"p5 range: {intervention_percentile_df['5th_percentile'].min():.3f} to {intervention_percentile_df['5th_percentile'].max():.3f})")
             else:
-                print("  Percentile df invalid — interventions will use hard 0/1 targets")
+                print("  WARNING: Percentile df invalid — computing manually from forward pass")
+                # Compute percentiles directly from model activations (no hooks needed)
+                model.eval()
+                all_c = []
+                dataset.setup(stage="fit")
+                with torch.no_grad():
+                    for batch in dataset.train_dataloader():
+                        x_b, _, _ = batch
+                        if torch.cuda.is_available():
+                            x_b = x_b.cuda(); model_tmp = model.cuda()
+                        else:
+                            model_tmp = model
+                        _, c_b = model_tmp(x_b)
+                        all_c.append(c_b.cpu())
+                all_c_np = torch.cat(all_c, dim=0).numpy()  # [N, K]
+                perc_rows = []
+                for k in range(K):
+                    perc_rows.append({
+                        "dimension": f"c_dim_{k}",
+                        "5th_percentile":  float(np.percentile(all_c_np[:, k], 5)),
+                        "95th_percentile": float(np.percentile(all_c_np[:, k], 95)),
+                    })
+                model.intervention_percentile_df = pd.DataFrame(perc_rows)
+                print(f"  Manual percentile scaling ENABLED")
         except Exception as e:
             print(f"  Percentile computation failed: {e} — using hard 0/1 targets")
 
