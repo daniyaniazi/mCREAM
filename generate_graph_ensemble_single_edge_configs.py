@@ -1,20 +1,26 @@
 """
 Generate mCREAM Graph Ensemble configs for single-edge perturbation.
 
-Same as standalone CREAM single-edge perturbation (scenario 2),
-but using mCREAM_GraphEnsemble with M experts all sharing the same perturbed graph.
+Each expert gets a DIFFERENT single-edge perturbed graph.
+One config = one group of 5 experts, each missing/adding a different edge.
 
-Direct comparison:
-  standalone CREAM: 1 model, graph with 1 edge wrong
-  GraphEnsemble:    M models, all with same 1 edge wrong
+Groups generated:
+  del_group_0: experts 0-4 each missing a different deletion edge
+  del_group_1: experts 0-4 each missing a different 5 deletion edges (next batch)
+  ...
+  add_group_0: experts 0-4 each adding a different spurious edge
 
-Both produce one (accuracy, CCI) point per edge. Compare the two scatter plots.
+Scientific question:
+  If each expert is missing a DIFFERENT edge, does c_avg recover GT performance?
+  Hypothesis: yes — collectively experts cover all edges.
 
 Usage:
     python generate_graph_ensemble_single_edge_configs.py --dataset cfmnist
 """
 
 import argparse
+import glob
+import os
 from pathlib import Path
 
 DATASETS = {
@@ -34,12 +40,13 @@ DATASETS = {
 }
 
 CONFIG_TEMPLATE = """\
-# mCREAM Graph Ensemble - single-edge perturbation: {description}
-# All {M} experts use the SAME perturbed graph.
-# Same as standalone CREAM single-edge, but with M graph module experts.
+# mCREAM Graph Ensemble - single-edge perturbation group: {group_name}
+# Each expert has a DIFFERENT single-edge perturbed graph.
+# Expert m is missing/adding edge m — collectively all M edges are covered.
+# Hypothesis: c_avg recovers GT performance when experts cover different edges.
 mode: train_cbm
 seed: 42
-experiment_name: {exp_name}
+experiment_name: gensingle_{group_name}
 dataset_name: {dataset_name}
 
 dataset_params:
@@ -52,7 +59,9 @@ backbone_model: {backbone}
 
 multi_expert:
   num_experts: {M}
-  noise_type: single_edge_perturbation
+  noise_type: edge_count_multi_seed
+  expert_dag_files:
+{dag_lines}
 
 hyperparameters_model2:
   num_classes: {num_classes}
@@ -75,9 +84,8 @@ trainer_param:
 
 paths:
   default_root_dir: ./experiments/
-  DAG_file: ./{perturbed_dag}
-  gt_dag_file: {gt_dag}
-  expert_graphs_dir: ./data/FashionMNIST/expert_graphs/graph_ensemble_single_edge/{exp_name}/
+  DAG_file: {dag}
+  expert_graphs_dir: ./data/FashionMNIST/expert_graphs/graph_ensemble_single_edge/{group_name}/
   input_model_path: {ckpt}
   softmax_mask: {softmax}
 """
@@ -90,40 +98,49 @@ def generate(dataset_key: str, M: int = 5):
     config_dir.mkdir(parents=True, exist_ok=True)
 
     if not perturb_dir.exists():
-        print(f'Run generate_single_edge_perturbation.py first — {perturb_dir} not found')
+        print(f'Run first: python generate_single_edge_perturbation.py --dataset {dataset_key}')
         return 0
 
-    all_csvs = sorted(list(perturb_dir.glob('del_edge_*.csv')) +
-                      list(perturb_dir.glob('add_edge_*.csv')))
-    print(f'{dataset_key}: found {len(all_csvs)} perturbed DAGs')
+    del_csvs = sorted(perturb_dir.glob('del_edge_*.csv'))
+    add_csvs = sorted(perturb_dir.glob('add_edge_*.csv'))
+    print(f'{dataset_key}: {len(del_csvs)} deletion, {len(add_csvs)} addition DAGs')
 
     count = 0
-    for csv_f in all_csvs:
-        name = csv_f.stem   # e.g. del_edge_Tops_Clothes
-        exp_name = f'gensingle_{name}'
-        description = name.replace('_', ' ')
 
+    def write_group(group_name, dag_files):
+        dag_lines = '\n'.join(f'    - ./{f}' for f in dag_files)
         content = CONFIG_TEMPLATE.format(
-            description=description,
-            exp_name=exp_name,
-            M=M,
-            dataset_name=cfg['dataset_name'],
-            backbone=cfg['backbone'],
-            num_classes=cfg['num_classes'],
-            num_concepts=cfg['num_concepts'],
-            num_exogenous=cfg['num_exogenous'],
-            num_side=cfg['num_side'],
-            concept_rep=cfg['concept_rep'],
-            dropout=cfg['dropout'],
-            max_epochs=cfg['max_epochs'],
-            prev_size=cfg['prev_size'],
-            perturbed_dag=str(csv_f),
-            gt_dag=cfg['dag'],
-            ckpt=cfg['ckpt'],
-            softmax=cfg['softmax'],
+            group_name=group_name, M=len(dag_files),
+            dag_lines=dag_lines,
+            dataset_name=cfg['dataset_name'], backbone=cfg['backbone'],
+            num_classes=cfg['num_classes'], num_concepts=cfg['num_concepts'],
+            num_exogenous=cfg['num_exogenous'], num_side=cfg['num_side'],
+            concept_rep=cfg['concept_rep'], dropout=cfg['dropout'],
+            max_epochs=cfg['max_epochs'], prev_size=cfg['prev_size'],
+            dag=cfg['dag'], ckpt=cfg['ckpt'], softmax=cfg['softmax'],
         )
-        (config_dir / f'{exp_name}.yaml').write_text(content, encoding='utf-8')
-        count += 1
+        (config_dir / f'gensingle_{group_name}.yaml').write_text(content, encoding='utf-8')
+        return 1
+
+    # Deletion groups: consecutive batches of M experts, each missing a different edge
+    for start in range(0, len(del_csvs), M):
+        batch = del_csvs[start:start + M]
+        if len(batch) < M:
+            break   # skip incomplete groups
+        group_name = f'del_group_{start // M}'
+        count += write_group(group_name, [str(f) for f in batch])
+        edge_names = [f.stem.replace('del_edge_','') for f in batch]
+        print(f'  {group_name}: experts missing {edge_names}')
+
+    # Addition groups
+    for start in range(0, len(add_csvs), M):
+        batch = add_csvs[start:start + M]
+        if len(batch) < M:
+            break
+        group_name = f'add_group_{start // M}'
+        count += write_group(group_name, [str(f) for f in batch])
+        edge_names = [f.stem.replace('add_edge_','') for f in batch]
+        print(f'  {group_name}: experts adding {edge_names}')
 
     print(f'Written {count} configs to {config_dir}')
     return count

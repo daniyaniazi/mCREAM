@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Experiment 2: mCREAM Graph Ensemble on single-edge perturbation graphs.
-# Each experiment: all 5 experts share the SAME graph with 1 edge changed.
-# 39 jobs total (29 deletions + 10 additions).
+# Each expert gets a DIFFERENT single-edge perturbed graph.
+# e.g. del_group_0:
+#   expert_0 <- del_edge_Tops_T-shirt.csv       (missing Tops->T-shirt)
+#   expert_1 <- del_edge_Bottoms_Trouser.csv    (missing Bottoms->Trouser)
+#   expert_2 <- del_edge_Dresses_Dress.csv      (missing Dresses->Dress)
+#   expert_3 <- del_edge_Outers_Coat.csv        (missing Outers->Coat)
+#   expert_4 <- del_edge_Accessories_Bag.csv    (missing Accessories->Bag)
+#   --> c_avg covers all 5 edges collectively, should recover GT performance
 #
 # PREREQUISITE (run once):
 #   python generate_single_edge_perturbation.py --dataset cfmnist --n_additions 10
