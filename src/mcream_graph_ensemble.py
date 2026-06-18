@@ -140,6 +140,15 @@ class UtoY_MultiGraph(UtoY_model):
             c_m = self.concept_activation_function(u2c_m(Uc))
             all_c.append(c_m)
         c = torch.stack(all_c, dim=0).mean(dim=0)   # [B, K]
+
+        # Re-normalize mutex groups after averaging.
+        # mean of M softmax vectors is NOT a valid softmax vector (sum != 1).
+        # Re-normalize so last_layer receives consistent group_soft inputs.
+        if (self.mutually_exclusive_concepts is not None
+                and self.concept_representation in ("group_soft", "group_hard")):
+            for group in self.mutually_exclusive_concepts:
+                group_sum = c[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
+                c[:, group] = c[:, group] / group_sum
         # ─────────────────────────────────────────────────────────────────────
 
         # Below is identical to CREAM's forward
@@ -204,6 +213,16 @@ class UtoY_MultiGraph(UtoY_model):
         c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
             c_predicted.dtype
         )
+
+        # Renormalize mutex groups to maintain sum=1 (required for group_soft).
+        # mutually_exclusive_concepts = [[0,5], [1,2,3,4,6,7], [8,9,10]]
+        # After partial intervention, group sum may != 1 → renormalize.
+        if (self.mutually_exclusive_concepts is not None
+                and self.concept_representation in ("group_soft", "group_hard")):
+            for group in self.mutually_exclusive_concepts:  # each group is a list of indices
+                group_sum = c_predicted[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
+                c_predicted[:, group] = c_predicted[:, group] / group_sum
+
         c = c_predicted
 
         # Shared side channel + task head — identical to CREAM
