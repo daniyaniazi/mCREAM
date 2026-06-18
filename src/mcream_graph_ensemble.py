@@ -172,6 +172,10 @@ class UtoY_MultiGraph(UtoY_model):
 
     # ── Interventions — inherited logic, but uses averaged c ─────────────────
 
+    # Set to True externally to enable intervention debug logging
+    _debug_interventions: bool = False
+    _debug_log_path: str = "/home/dani00003/mCREAM/logs/intervention_debug_graph_ensemble.txt"
+
     def forward_with_interventions(
         self,
         x: Tensor,
@@ -181,22 +185,28 @@ class UtoY_MultiGraph(UtoY_model):
     ) -> tuple[Tensor, Tensor]:
         """
         Same as CREAM's forward_with_interventions but uses c_avg from M experts.
-        After computing c_avg, we replace intervened positions with true values —
-        exactly what CREAM does with its single c.
         """
         u  = self.u2u_model(x)
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
-        # Compute c_avg from M experts (same as forward)
+        # Compute c_avg from M experts
         all_c = []
         for u2c_m in self.u2c_models:
             c_m = self.concept_activation_function(u2c_m(Uc))
             all_c.append(c_m)
         c = torch.stack(all_c, dim=0).mean(dim=0)   # [B, K]
+
+        # Renormalize mutex groups after averaging
+        if (self.mutually_exclusive_concepts is not None
+                and self.concept_representation in ("group_soft", "group_hard")):
+            for group in self.mutually_exclusive_concepts:
+                group_sum = c[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
+                c[:, group] = c[:, group] / group_sum
+
         c_predicted = c.clone()
 
-        # Generate intervention mask (inherited from UtoY_model)
+        # Generate intervention mask
         if intervention_mask is None:
             if self.group_interventions:
                 intervention_mask = self.generate_group_intervention_mask(
@@ -209,19 +219,50 @@ class UtoY_MultiGraph(UtoY_model):
                     batch_size=c.size(0),
                 )
 
+        # ── DEBUG LOGGING ─────────────────────────────────────────────────────
+        if getattr(self, '_debug_interventions', False) and num_interventions > 0:
+            import os
+            log_path = getattr(self, '_debug_log_path',
+                               '/home/dani00003/mCREAM/logs/intervention_debug_graph_ensemble.txt')
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                s0 = c_predicted[0].detach().cpu().numpy()
+                tc0 = true_concepts[0].detach().cpu().float().numpy()
+                mask0 = intervention_mask[0].detach().cpu().numpy()
+                f.write(f"\n{'='*60}\n")
+                f.write(f"num_interventions={num_interventions}  group={self.group_interventions}\n")
+                f.write(f"c_avg BEFORE intervention (sample 0):\n  {[f'{v:.4f}' for v in s0]}\n")
+                f.write(f"true_concepts (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
+                f.write(f"intervention_mask (sample 0):\n  {mask0.tolist()}\n")
+                # Mutex group sums before
+                if self.mutually_exclusive_concepts:
+                    f.write("Group sums BEFORE replace:\n")
+                    for g in self.mutually_exclusive_concepts:
+                        f.write(f"  group{g}: {sum(s0[i] for i in g):.4f}  values={[f'{s0[i]:.4f}' for i in g]}\n")
+        # ─────────────────────────────────────────────────────────────────────
+
         # Replace predicted concepts with true values at intervened positions
         c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
             c_predicted.dtype
         )
 
-        # Renormalize mutex groups to maintain sum=1 (required for group_soft).
-        # mutually_exclusive_concepts = [[0,5], [1,2,3,4,6,7], [8,9,10]]
-        # After partial intervention, group sum may != 1 → renormalize.
+        # Renormalize mutex groups after replacement
         if (self.mutually_exclusive_concepts is not None
                 and self.concept_representation in ("group_soft", "group_hard")):
-            for group in self.mutually_exclusive_concepts:  # each group is a list of indices
+            for group in self.mutually_exclusive_concepts:
                 group_sum = c_predicted[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
                 c_predicted[:, group] = c_predicted[:, group] / group_sum
+
+        # ── DEBUG LOGGING AFTER ───────────────────────────────────────────────
+        if getattr(self, '_debug_interventions', False) and num_interventions > 0:
+            with open(log_path, 'a') as f:
+                s1 = c_predicted[0].detach().cpu().numpy()
+                f.write(f"c_avg AFTER intervention+renorm (sample 0):\n  {[f'{v:.4f}' for v in s1]}\n")
+                if self.mutually_exclusive_concepts:
+                    f.write("Group sums AFTER replace+renorm:\n")
+                    for g in self.mutually_exclusive_concepts:
+                        f.write(f"  group{g}: {sum(s1[i] for i in g):.4f}  values={[f'{s1[i]:.4f}' for i in g]}\n")
+        # ─────────────────────────────────────────────────────────────────────
 
         c = c_predicted
 

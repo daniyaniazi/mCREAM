@@ -1019,9 +1019,41 @@ class UtoY_model(Template_MultiClass):
                     batch_size=c.size(0),
                 )
 
+        # ── DEBUG LOGGING ─────────────────────────────────────────────────────
+        if getattr(self, '_debug_interventions', False) and num_interventions > 0:
+            import os
+            log_path = getattr(self, '_debug_log_path',
+                               '/home/dani00003/mCREAM/logs/intervention_debug_cream.txt')
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'a') as f:
+                s0 = c_predicted[0].detach().cpu().numpy()
+                tc0 = true_concepts[0].detach().cpu().float().numpy()
+                mask0 = intervention_mask[0].detach().cpu().numpy()
+                f.write(f"\n{'='*60}\n")
+                f.write(f"num_interventions={num_interventions}  group={getattr(self,'group_interventions',False)}\n")
+                f.write(f"c BEFORE intervention (sample 0):\n  {[f'{v:.4f}' for v in s0]}\n")
+                f.write(f"true_concepts (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
+                f.write(f"intervention_mask (sample 0):\n  {mask0.tolist()}\n")
+                if getattr(self, 'mutually_exclusive_concepts', None):
+                    f.write("Group sums BEFORE replace:\n")
+                    for g in self.mutually_exclusive_concepts:
+                        f.write(f"  group{g}: {sum(s0[i] for i in g):.4f}\n")
+        # ─────────────────────────────────────────────────────────────────────
+
         c_predicted[intervention_mask] = (true_concepts[intervention_mask]).type(
             c_predicted.dtype
         )
+
+        # ── DEBUG LOGGING AFTER ───────────────────────────────────────────────
+        if getattr(self, '_debug_interventions', False) and num_interventions > 0:
+            with open(log_path, 'a') as f:
+                s1 = c_predicted[0].detach().cpu().numpy()
+                f.write(f"c AFTER intervention (sample 0):\n  {[f'{v:.4f}' for v in s1]}\n")
+                if getattr(self, 'mutually_exclusive_concepts', None):
+                    f.write("Group sums AFTER replace:\n")
+                    for g in self.mutually_exclusive_concepts:
+                        f.write(f"  group{g}: {sum(s1[i] for i in g):.4f}\n")
+        # ─────────────────────────────────────────────────────────────────────
 
         c = c_predicted  # CHANGE C TO THE INTERVENED VALUES
 

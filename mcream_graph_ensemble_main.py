@@ -343,6 +343,13 @@ def run_single_seed(config, config_path, seed):
         except Exception as e:
             print(f"  Percentile computation failed: {e} — using hard 0/1 targets")
 
+    # Enable intervention debug logging (writes to separate file)
+    model.u_to_CY._debug_interventions = True
+    model.u_to_CY._debug_log_path = str(
+        Path(pl_checkpoint_path) / "intervention_debug_graph_ensemble.txt"
+    )
+    import os; os.makedirs(os.path.dirname(model.u_to_CY._debug_log_path), exist_ok=True)
+
     print("Running interventions...")
     intervention_results = []
     interv_trainer = pl.Trainer(
