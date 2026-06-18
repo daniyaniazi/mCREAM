@@ -241,17 +241,15 @@ class UtoY_MultiGraph(UtoY_model):
                         f.write(f"  group{g}: {sum(s0[i] for i in g):.4f}  values={[f'{s0[i]:.4f}' for i in g]}\n")
         # ─────────────────────────────────────────────────────────────────────
 
-        # Replace predicted concepts with true values at intervened positions
+        # Replace predicted concepts with true values at intervened positions.
+        # true_concepts is already percentile-scaled by _convert_hard_interventions_to_soft
+        # (called in Template_CBM_MultiClass.forward_with_interventions_cbm before us).
+        # Do NOT renormalize — percentile scaling ensures values are in activation range.
+        # Renormalizing after replacement with percentile-scaled values can create
+        # near-zero group sums when all group members have p5≈0.0 (absent concepts).
         c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
             c_predicted.dtype
         )
-
-        # Renormalize mutex groups after replacement
-        if (self.mutually_exclusive_concepts is not None
-                and self.concept_representation in ("group_soft", "group_hard")):
-            for group in self.mutually_exclusive_concepts:
-                group_sum = c_predicted[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
-                c_predicted[:, group] = c_predicted[:, group] / group_sum
 
         # ── DEBUG LOGGING AFTER ───────────────────────────────────────────────
         if getattr(self, '_debug_interventions', False) and num_interventions > 0:
