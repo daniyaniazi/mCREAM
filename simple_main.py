@@ -488,10 +488,12 @@ def my_main(config_path: Path) -> None:
         ### interventions
         if config["mode"] != "train_x2y":  # not blackbox
             # Enable debug logging for intervention comparison
+            import os as _os
+            _debug_log = str(Path(pl_checkpoint_path) / "intervention_debug_cream.txt")
+            _os.makedirs(str(Path(pl_checkpoint_path)), exist_ok=True)
             model.u_to_CY._debug_interventions = True
-            model.u_to_CY._debug_log_path = str(
-                default_root_dir / config_simple_name_version / "intervention_debug_cream.txt"
-            )
+            model.u_to_CY._debug_log_path = _debug_log
+            print(f"Intervention debug log: {_debug_log}")
             try:
                 intervention_results = interventions(
                     model,
