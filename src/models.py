@@ -1029,11 +1029,13 @@ class UtoY_model(Template_MultiClass):
                 s0 = c_predicted[0].detach().cpu().numpy()
                 tc0 = true_concepts[0].detach().cpu().float().numpy()
                 mask0 = intervention_mask[0].detach().cpu().numpy()
+                diff0 = [f'{s0[i] - tc0[i]:+.4f}' for i in range(len(s0))]
                 f.write(f"\n{'='*60}\n")
                 f.write(f"num_interventions={num_interventions}  group={getattr(self,'group_interventions',False)}\n")
                 f.write(f"c BEFORE intervention (sample 0):\n  {[f'{v:.4f}' for v in s0]}\n")
-                f.write(f"true_concepts (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
-                f.write(f"intervention_mask (sample 0):\n  {mask0.tolist()}\n")
+                f.write(f"true_concepts        (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
+                f.write(f"diff (c - true)      (sample 0):\n  {diff0}\n")
+                f.write(f"intervention_mask    (sample 0):\n  {mask0.tolist()}\n")
                 if getattr(self, 'mutually_exclusive_concepts', None):
                     f.write("Group sums BEFORE replace:\n")
                     for g in self.mutually_exclusive_concepts:

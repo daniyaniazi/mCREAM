@@ -225,12 +225,13 @@ class UtoY_MultiGraph(UtoY_model):
                 s0 = c_predicted[0].detach().cpu().numpy()
                 tc0 = true_concepts[0].detach().cpu().float().numpy()
                 mask0 = intervention_mask[0].detach().cpu().numpy()
+                diff0 = [f'{s0[i] - tc0[i]:+.4f}' for i in range(len(s0))]
                 f.write(f"\n{'='*60}\n")
                 f.write(f"num_interventions={num_interventions}  group={self.group_interventions}\n")
                 f.write(f"c_avg BEFORE intervention (sample 0):\n  {[f'{v:.4f}' for v in s0]}\n")
-                f.write(f"true_concepts (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
-                f.write(f"intervention_mask (sample 0):\n  {mask0.tolist()}\n")
-                # Mutex group sums before
+                f.write(f"true_concepts        (sample 0):\n  {[f'{v:.4f}' for v in tc0]}\n")
+                f.write(f"diff (c - true)      (sample 0):\n  {diff0}\n")
+                f.write(f"intervention_mask    (sample 0):\n  {mask0.tolist()}\n")
                 if self.mutually_exclusive_concepts:
                     f.write("Group sums BEFORE replace:\n")
                     for g in self.mutually_exclusive_concepts:
@@ -430,18 +431,14 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
 
     def _get_preds_loss_accuracy(self, batch):
         """
-        Override Template_CBM_MultiClass._get_preds_loss_accuracy so that
-        per-expert concept loss from UtoY_MultiGraph is actually used.
+        Override Template_CBM_MultiClass._get_preds_loss_accuracy.
 
-        Template_CBM_MultiClass calls calculate_mixed_loss() directly,
-        which only supervises the final c_avg — not each expert branch.
-        Delegating to self.u_to_CY uses our per-expert weighted BCE.
+        Inlines per-expert concept loss using self.task_loss_function etc.
+        from the outer model — avoids AttributeError when delegating to inner.
         """
         x, target_concepts, y_true = batch
 
         if self.interventions is True:
-            # intervention path: use parent's forward_with_interventions_cbm
-            # then compute loss manually same as below
             task_logits, concept_output = self.forward_with_interventions_cbm(
                 x, target_concepts, y_true
             )
@@ -458,10 +455,84 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
                 lambda_weight=self.lambda_weight,
             )
 
-        # Training / validation / test (non-intervention):
-        # delegate entirely to UtoY_MultiGraph which runs one forward pass
-        # and computes per-expert + ensemble concept loss on the exact c_avg
-        # that last_layer trains on.
-        u = self.x_to_u(x)   # concept_extractor: [B, 128]
-        return self.u_to_CY._get_preds_loss_accuracy((u, target_concepts, y_true))
+        # ── One forward pass through backbone + M expert blocks ──────────────
+        u   = self.x_to_u(x)                                         # [B, 128]
+        u2  = self.u_to_CY.u2u_model(u)                              # [B, 128]
+        Uc  = u2[:, : self.u_to_CY.num_exogenous - self.u_to_CY.num_side_channel]
+        Uy  = u2[:, self.u_to_CY.num_exogenous - self.u_to_CY.num_side_channel:]
+
+        # ── Per-expert concept loss ───────────────────────────────────────────
+        lambdas = torch.softmax(self.u_to_CY._lambda_logits, dim=0)  # [M]
+
+        all_logits = []
+        per_expert_concept_loss = torch.tensor(0.0, device=x.device)
+        expert_bce_list = []
+        for m_idx, u2c_m in enumerate(self.u_to_CY.u2c_models):
+            logits_m = u2c_m(Uc)
+            all_logits.append(logits_m)
+            c_m = self.u_to_CY.concept_activation_function(logits_m)
+            bce_m = F.binary_cross_entropy(
+                c_m.clamp(1e-7, 1 - 1e-7), target_concepts.float()
+            )
+            expert_bce_list.append(bce_m.item())
+            per_expert_concept_loss = per_expert_concept_loss + lambdas[m_idx] * bce_m
+
+        # c_avg — identical aggregation to forward() and forward_with_interventions()
+        c_logits_stacked = torch.stack(all_logits, dim=0)                          # [M, B, K]
+        c_logits_agg     = (lambdas[:, None, None] * c_logits_stacked).sum(dim=0)  # [B, K]
+        c_avg            = self.u_to_CY.concept_activation_function(c_logits_agg)  # [B, K]
+
+        ensemble_bce = F.binary_cross_entropy(
+            c_avg.clamp(1e-7, 1 - 1e-7), target_concepts.float()
+        ).item()
+        # per_expert_concept_loss = per_expert_concept_loss + ensemble_concept_loss  # disabled: only per-expert losses used
+
+        # ── Loss logging ──────────────────────────────────────────────────────
+        if getattr(self, '_debug_loss', False):
+            lambda_vals = torch.softmax(self.u_to_CY._lambda_logits, dim=0).detach().cpu().tolist()
+            print("\n--- concept loss breakdown ---")
+            for m_idx, (bce_m, lam_m) in enumerate(zip(expert_bce_list, lambda_vals)):
+                print(f"  expert[{m_idx}]: BCE={bce_m:.4f}  λ={lam_m:.4f}  weighted={lam_m*bce_m:.4f}")
+            print(f"  ensemble BCE(c_avg, true) = {ensemble_bce:.4f}  [NOT added to loss]")
+            print(f"  per_expert_concept_loss   = {per_expert_concept_loss.item():.4f}")
+            print(f"  combined concept_loss     = {per_expert_concept_loss.item():.4f}")
+
+        # ── Task prediction ───────────────────────────────────────────────────
+        if self.u_to_CY.side_dropout is True and self.u_to_CY.masking_algorithm == "none":
+            s = self.u_to_CY.side_channel(Uc)
+            y = self.u_to_CY.last_layer(torch.cat((c_avg, s), dim=1))
+        elif self.u_to_CY.num_side_channel > 0:
+            s = self.u_to_CY.side_channel(Uy)
+            y = self.u_to_CY.last_layer(torch.cat((c_avg, s), dim=1))
+        else:
+            y = self.u_to_CY.last_layer(c_avg)
+
+        # ── Task loss — uses self.task_loss_function from outer model ─────────
+        if self.num_classes == 1:
+            task_loss  = self.task_loss_function(y.squeeze(-1), y_true.float().squeeze(-1))
+            task_preds = (torch.sigmoid(y) > 0.5).int().squeeze(-1)
+            task_acc   = accuracy(y.squeeze(-1), y_true.squeeze(-1).int(), task="binary")
+        else:
+            task_loss  = self.task_loss_function(y, y_true)
+            task_preds = y.argmax(dim=1)
+            task_acc   = accuracy(task_preds, y_true.view(-1), task="multiclass",
+                                  num_classes=self.num_classes)
+
+        concept_acc   = accuracy(c_avg, target_concepts, task="multilabel",
+                                 num_labels=self.num_concepts)
+        concept_preds = (c_avg > 0.5).int()
+
+        total_loss        = task_loss + self.lambda_weight * per_expert_concept_loss
+        task_loss_percent = task_loss / total_loss * 100
+
+        return (
+            task_preds,
+            concept_preds,
+            per_expert_concept_loss,
+            task_loss,
+            concept_acc,
+            task_acc,
+            total_loss,
+            task_loss_percent,
+        )
 
