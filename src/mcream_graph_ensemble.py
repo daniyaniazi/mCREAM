@@ -281,35 +281,41 @@ class UtoY_MultiGraph(UtoY_model):
         """
         x, target_concepts, y_true = batch
 
-        y, c_avg = self(x)   # uses our new forward
-
-        # ── Per-expert concept loss ───────────────────────────────────────────
+        # Run forward once — reuse u and logits for both task and concept loss
         u  = self.u2u_model(x)
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
+        Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
-        # Learnable per-expert weights λ_m (Kavya: multi-task learning style)
-        # softmax → sum to 1, always positive
+        # ── Collect per-expert logits and probabilities ───────────────────────
         lambdas = torch.softmax(self._lambda_logits, dim=0)   # [M]
 
-        all_c_m = []
+        all_logits = []
         per_expert_concept_loss = torch.tensor(0.0, device=x.device)
         for m_idx, u2c_m in enumerate(self.u2c_models):
-            c_m = self.concept_activation_function(u2c_m(Uc))
-            all_c_m.append(c_m)
-            # λ_m · BCE(c_m, c_true)  — weighted per-expert supervision
+            logits_m = u2c_m(Uc)                                      # [B, K] raw logits
+            all_logits.append(logits_m)
+            c_m = self.concept_activation_function(logits_m)          # [B, K] probs
             bce_m = F.binary_cross_entropy(
                 c_m.clamp(1e-7, 1 - 1e-7), target_concepts.float()
             )
             per_expert_concept_loss = per_expert_concept_loss + lambdas[m_idx] * bce_m
 
-        # Also supervise c_avg (the vector that actually enters last_layer)
-        c_avg_supervised = torch.stack(all_c_m, dim=0).mean(dim=0)
+        # c_avg: same aggregation as forward() — supervise the actual c seen by last_layer
+        c_logits_agg = torch.stack(all_logits, dim=0).max(dim=0).values  # [B, K]
+        c_avg = self.concept_activation_function(c_logits_agg)            # [B, K]
+
         ensemble_concept_loss = F.binary_cross_entropy(
-            c_avg_supervised.clamp(1e-7, 1 - 1e-7), target_concepts.float()
+            c_avg.clamp(1e-7, 1 - 1e-7), target_concepts.float()
         )
-        # Final concept loss = weighted individual + ensemble
-        # concept_loss = Σ_m λ_m·BCE(c_m) + BCE(c_avg)
+        # concept_loss = Σ_m λ_m·BCE(c_m) + BCE(c_avg_exact)
         per_expert_concept_loss = per_expert_concept_loss + ensemble_concept_loss
+
+        # ── Task prediction using same c_avg ──────────────────────────────────
+        if self.num_side_channel > 0:
+            s = self.side_channel(Uy)
+            y = self.last_layer(torch.cat((c_avg, s), dim=1))
+        else:
+            y = self.last_layer(c_avg)
 
         # ── Task loss ─────────────────────────────────────────────────────────
         if self.num_classes == 1:
