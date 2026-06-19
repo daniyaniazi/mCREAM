@@ -281,10 +281,9 @@ class UtoY_MultiGraph(UtoY_model):
         This gives each u2c_models[m] the full concept gradient (1.0)
         instead of CREAM's 1.0 / num_experts dilution.
         """
-        x, target_concepts, y_true = batch
+        u, target_concepts, y_true = batch   # u already computed by mCREAM_GraphEnsemble
 
-        # Run forward once — reuse u and logits for both task and concept loss
-        u  = self.u2u_model(x)
+        # Split u into concept and side-channel parts
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
@@ -292,7 +291,7 @@ class UtoY_MultiGraph(UtoY_model):
         lambdas = torch.softmax(self._lambda_logits, dim=0)   # [M]
 
         all_logits = []
-        per_expert_concept_loss = torch.tensor(0.0, device=x.device)
+        per_expert_concept_loss = torch.tensor(0.0, device=u.device)
         for m_idx, u2c_m in enumerate(self.u2c_models):
             logits_m = u2c_m(Uc)                                      # [B, K] raw logits
             all_logits.append(logits_m)
@@ -428,4 +427,41 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
     # This is identical to how CREAM works in simple_main.py.
     # All intervention logic (percentile scaling, group interventions) is
     # inherited unchanged from Template_CBM_MultiClass.
+
+    def _get_preds_loss_accuracy(self, batch):
+        """
+        Override Template_CBM_MultiClass._get_preds_loss_accuracy so that
+        per-expert concept loss from UtoY_MultiGraph is actually used.
+
+        Template_CBM_MultiClass calls calculate_mixed_loss() directly,
+        which only supervises the final c_avg — not each expert branch.
+        Delegating to self.u_to_CY uses our per-expert weighted BCE.
+        """
+        x, target_concepts, y_true = batch
+
+        if self.interventions is True:
+            # intervention path: use parent's forward_with_interventions_cbm
+            # then compute loss manually same as below
+            task_logits, concept_output = self.forward_with_interventions_cbm(
+                x, target_concepts, y_true
+            )
+            from .models import calculate_mixed_loss
+            return calculate_mixed_loss(
+                task_logits=task_logits,
+                concept_logits=concept_output,
+                target_concepts=target_concepts,
+                y=y_true,
+                concept_loss_function=self.concept_loss_function,
+                task_loss_function=self.task_loss_function,
+                num_concepts=self.num_concepts,
+                num_classes=self.num_classes,
+                lambda_weight=self.lambda_weight,
+            )
+
+        # Training / validation / test (non-intervention):
+        # delegate entirely to UtoY_MultiGraph which runs one forward pass
+        # and computes per-expert + ensemble concept loss on the exact c_avg
+        # that last_layer trains on.
+        u = self.x_to_u(x)   # concept_extractor: [B, 128]
+        return self.u_to_CY._get_preds_loss_accuracy((u, target_concepts, y_true))
 
