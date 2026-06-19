@@ -135,20 +135,20 @@ class UtoY_MultiGraph(UtoY_model):
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
         # ── CHANGED: run M concept blocks, average results ────────────────────
-        all_c = []
+        # Aggregate at LOGIT level, then activate once.
+        # This produces sharper outputs matching CREAM's near-binary c.
+        #
+        # Averaging probabilities: mean([0.9, 0.1]) = 0.5  (soft, loses signal)
+        # Averaging logits:        mean([+3, -3])   = 0.0  → sigmoid = 0.5
+        #                          BUT mean([+5, -1]) = +2.0 → sigmoid = 0.88 (sharper)
+        #
+        # For group_soft: average the MaskedMLP outputs (logits) then apply
+        # group_softmax once → same confident distribution as CREAM.
+        all_c_logits = []
         for u2c_m in self.u2c_models:
-            c_m = self.concept_activation_function(u2c_m(Uc))
-            all_c.append(c_m)
-        c = torch.stack(all_c, dim=0).mean(dim=0)   # [B, K]
-
-        # Re-normalize mutex groups after averaging.
-        # mean of M softmax vectors is NOT a valid softmax vector (sum != 1).
-        # Re-normalize so last_layer receives consistent group_soft inputs.
-        if (self.mutually_exclusive_concepts is not None
-                and self.concept_representation in ("group_soft", "group_hard")):
-            for group in self.mutually_exclusive_concepts:
-                group_sum = c[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
-                c[:, group] = c[:, group] / group_sum
+            all_c_logits.append(u2c_m(Uc))   # raw logits [B, K]
+        c_logits_avg = torch.stack(all_c_logits, dim=0).mean(dim=0)  # [B, K]
+        c = self.concept_activation_function(c_logits_avg)            # activate once
         # ─────────────────────────────────────────────────────────────────────
 
         # Below is identical to CREAM's forward
@@ -190,20 +190,12 @@ class UtoY_MultiGraph(UtoY_model):
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
-        # Compute c_avg from M experts
-        all_c = []
+        # Aggregate at logit level then activate once — same as forward()
+        all_c_logits = []
         for u2c_m in self.u2c_models:
-            c_m = self.concept_activation_function(u2c_m(Uc))
-            all_c.append(c_m)
-        c = torch.stack(all_c, dim=0).mean(dim=0)   # [B, K]
-
-        # Renormalize mutex groups after averaging
-        if (self.mutually_exclusive_concepts is not None
-                and self.concept_representation in ("group_soft", "group_hard")):
-            for group in self.mutually_exclusive_concepts:
-                group_sum = c[:, group].sum(dim=1, keepdim=True).clamp(min=1e-8)
-                c[:, group] = c[:, group] / group_sum
-
+            all_c_logits.append(u2c_m(Uc))
+        c_logits_avg = torch.stack(all_c_logits, dim=0).mean(dim=0)
+        c = self.concept_activation_function(c_logits_avg)
         c_predicted = c.clone()
 
         # Generate intervention mask
@@ -242,11 +234,8 @@ class UtoY_MultiGraph(UtoY_model):
         # ─────────────────────────────────────────────────────────────────────
 
         # Replace predicted concepts with true values at intervened positions.
-        # true_concepts is already percentile-scaled by _convert_hard_interventions_to_soft
-        # (called in Template_CBM_MultiClass.forward_with_interventions_cbm before us).
-        # Do NOT renormalize — percentile scaling ensures values are in activation range.
-        # Renormalizing after replacement with percentile-scaled values can create
-        # near-zero group sums when all group members have p5≈0.0 (absent concepts).
+        # true_concepts is already percentile-scaled by _convert_hard_interventions_to_soft.
+        # Identical to CREAM's forward_with_interventions line 1022.
         c_predicted[intervention_mask] = true_concepts[intervention_mask].type(
             c_predicted.dtype
         )
