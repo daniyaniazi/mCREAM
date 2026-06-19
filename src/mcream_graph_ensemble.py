@@ -144,12 +144,13 @@ class UtoY_MultiGraph(UtoY_model):
         #
         # For group_soft: average the MaskedMLP outputs (logits) then apply
         # group_softmax once → same confident distribution as CREAM.
+        weights = torch.softmax(self._lambda_logits, dim=0)  # [M]
         all_c_logits = []
         for u2c_m in self.u2c_models:
             all_c_logits.append(u2c_m(Uc))   # raw logits [B, K]
-        c_logits_stacked = torch.stack(all_c_logits, dim=0)           # [M, B, K]
-        c_logits_agg = c_logits_stacked.max(dim=0).values             # [B, K] — most confident expert per concept
-        c = self.concept_activation_function(c_logits_agg)            # activate once
+        c_logits_stacked = torch.stack(all_c_logits, dim=0)                        # [M, B, K]
+        c_logits_agg = (weights[:, None, None] * c_logits_stacked).sum(dim=0)      # [B, K] weighted mean
+        c = self.concept_activation_function(c_logits_agg)                         # activate once
         # ─────────────────────────────────────────────────────────────────────
 
         # Below is identical to CREAM's forward
@@ -192,11 +193,12 @@ class UtoY_MultiGraph(UtoY_model):
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
         # Aggregate at logit level then activate once — same as forward()
+        weights = torch.softmax(self._lambda_logits, dim=0)  # [M]
         all_c_logits = []
         for u2c_m in self.u2c_models:
             all_c_logits.append(u2c_m(Uc))
-        c_logits_stacked = torch.stack(all_c_logits, dim=0)           # [M, B, K]
-        c_logits_agg = c_logits_stacked.max(dim=0).values             # [B, K]
+        c_logits_stacked = torch.stack(all_c_logits, dim=0)                       # [M, B, K]
+        c_logits_agg = (weights[:, None, None] * c_logits_stacked).sum(dim=0)     # [B, K] weighted mean
         c = self.concept_activation_function(c_logits_agg)
         c_predicted = c.clone()
 
@@ -286,7 +288,7 @@ class UtoY_MultiGraph(UtoY_model):
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
         Uy = u[:, self.num_exogenous - self.num_side_channel:]
 
-        # ── Collect per-expert logits and probabilities ───────────────────────
+        # ── Collect per-expert logits — one forward pass ─────────────────────
         lambdas = torch.softmax(self._lambda_logits, dim=0)   # [M]
 
         all_logits = []
@@ -300,18 +302,23 @@ class UtoY_MultiGraph(UtoY_model):
             )
             per_expert_concept_loss = per_expert_concept_loss + lambdas[m_idx] * bce_m
 
-        # c_avg: same aggregation as forward() — supervise the actual c seen by last_layer
-        c_logits_agg = torch.stack(all_logits, dim=0).max(dim=0).values  # [B, K]
-        c_avg = self.concept_activation_function(c_logits_agg)            # [B, K]
+        # c_avg: SAME weighted-mean aggregation as forward() and forward_with_interventions()
+        # Supervising the exact c that last_layer trains on — no mismatch
+        c_logits_stacked = torch.stack(all_logits, dim=0)                         # [M, B, K]
+        c_logits_agg = (lambdas[:, None, None] * c_logits_stacked).sum(dim=0)     # [B, K]
+        c_avg = self.concept_activation_function(c_logits_agg)                    # [B, K]
 
         ensemble_concept_loss = F.binary_cross_entropy(
             c_avg.clamp(1e-7, 1 - 1e-7), target_concepts.float()
         )
-        # concept_loss = Σ_m λ_m·BCE(c_m) + BCE(c_avg_exact)
+        # concept_loss = Σ_m λ_m·BCE(c_m) + BCE(c_avg)
         per_expert_concept_loss = per_expert_concept_loss + ensemble_concept_loss
 
         # ── Task prediction using same c_avg ──────────────────────────────────
-        if self.num_side_channel > 0:
+        if self.side_dropout is True and self.masking_algorithm == "none":
+            s = self.side_channel(Uc)
+            y = self.last_layer(torch.cat((c_avg, s), dim=1))
+        elif self.num_side_channel > 0:
             s = self.side_channel(Uy)
             y = self.last_layer(torch.cat((c_avg, s), dim=1))
         else:
@@ -412,6 +419,7 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
             num_concepts=num_concepts,
             num_side_channel=num_side_channel,
             learning_rate=learning_rate,
+            lambda_weight=lambda_weight,   # BUG FIX: was missing → parent used default 0.01 → concept supervision ignored
         )
 
     # forward() and forward_with_interventions_cbm() are NOT overridden here.
