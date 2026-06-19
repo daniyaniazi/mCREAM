@@ -147,8 +147,9 @@ class UtoY_MultiGraph(UtoY_model):
         all_c_logits = []
         for u2c_m in self.u2c_models:
             all_c_logits.append(u2c_m(Uc))   # raw logits [B, K]
-        c_logits_avg = torch.stack(all_c_logits, dim=0).mean(dim=0)  # [B, K]
-        c = self.concept_activation_function(c_logits_avg)            # activate once
+        c_logits_stacked = torch.stack(all_c_logits, dim=0)           # [M, B, K]
+        c_logits_agg = c_logits_stacked.max(dim=0).values             # [B, K] — most confident expert per concept
+        c = self.concept_activation_function(c_logits_agg)            # activate once
         # ─────────────────────────────────────────────────────────────────────
 
         # Below is identical to CREAM's forward
@@ -194,8 +195,9 @@ class UtoY_MultiGraph(UtoY_model):
         all_c_logits = []
         for u2c_m in self.u2c_models:
             all_c_logits.append(u2c_m(Uc))
-        c_logits_avg = torch.stack(all_c_logits, dim=0).mean(dim=0)
-        c = self.concept_activation_function(c_logits_avg)
+        c_logits_stacked = torch.stack(all_c_logits, dim=0)           # [M, B, K]
+        c_logits_agg = c_logits_stacked.max(dim=0).values             # [B, K]
+        c = self.concept_activation_function(c_logits_agg)
         c_predicted = c.clone()
 
         # Generate intervention mask
