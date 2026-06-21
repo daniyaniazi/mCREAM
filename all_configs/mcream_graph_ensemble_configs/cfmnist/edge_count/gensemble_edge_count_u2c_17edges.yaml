@@ -3,6 +3,7 @@
 # 5 diverse graphs → 1 ensemble (compare with CREAM boxplot at same count).
 mode: train_cbm
 seed: 42
+seeds: [42, 7, 1, 134, 89]
 experiment_name: gensemble_edge_count_u2c_17edges
 dataset_name: Complete_Concept_FMNIST
 
