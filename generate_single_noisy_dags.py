@@ -21,14 +21,14 @@ import numpy as np
 # ground_truth_dag is used to read the real node names and concept/class split
 DATASET_CONFIGS = {
     "cfmnist": {
-        "expert_graphs_base": "data/FashionMNIST/expert_graphs/M5",
+        "expert_graphs_base": "data/FashionMNIST/expert_graphs/ensemble",
         "output_dir": "data/FashionMNIST/noisy_dags",
         "ground_truth_dag": "data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv",
         "num_concepts": 11,   # first 11 nodes are concepts
         "num_classes": 10,    # last 10 nodes are classes
     },
     "celeba": {
-        "expert_graphs_base": "data/CelebA/expert_graphs/M5",
+        "expert_graphs_base": "data/CelebA/expert_graphs/ensemble",
         "output_dir": "data/CelebA/noisy_dags",
         "ground_truth_dag": "data/CelebA/final_DAG_unfair.csv",
         "num_concepts": 7,    # first 7 nodes are concepts
@@ -104,16 +104,19 @@ def tensors_to_dag_csv(u2c: torch.Tensor, c2y: torch.Tensor,
 
 def main():
     parser = argparse.ArgumentParser(description="Generate noisy DAG CSV from expert_0")
-    parser.add_argument("--dataset", type=str, required=True, 
+    parser.add_argument("--dataset", type=str, required=True,
                         choices=["cfmnist", "celeba"],
                         help="Dataset name")
+    parser.add_argument("--action", type=str, required=True,
+                        choices=["addition", "deletion", "reversal"],
+                        help="Noise action type")
     parser.add_argument("--level", type=str, required=True,
-                        choices=["low", "medium", "high", "structured_bias"],
+                        choices=["low", "medium", "high"],
                         help="Disagreement level")
     parser.add_argument("--expert_idx", type=int, default=0,
                         help="Which expert to use (default: 0)")
     args = parser.parse_args()
-    
+
     config = DATASET_CONFIGS[args.dataset]
     num_concepts = config["num_concepts"]
     num_classes = config["num_classes"]
@@ -122,27 +125,29 @@ def main():
     gt_dag = load_ground_truth_dag(config["ground_truth_dag"])
     print(f"Ground-truth DAG: {gt_dag.shape}  nodes: {list(gt_dag.index)}")
 
-    print(f"Loading expert_{args.expert_idx} from {args.dataset}/{args.level}...")
-    
+    # ensemble/ saves as {action}_{level}/
+    subdir = f"{args.action}_{args.level}"
+    print(f"Loading expert_{args.expert_idx} from {args.dataset}/{subdir}...")
+
     # Load tensors
     u2c, c2y = load_expert_tensors(
-        config["expert_graphs_base"], 
-        args.level, 
+        config["expert_graphs_base"],
+        subdir,
         args.expert_idx
     )
-    
+
     print(f"  u2c shape: {u2c.shape}")
     print(f"  c2y shape: {c2y.shape}")
-    
+
     # Convert to DAG CSV
     dag_df = tensors_to_dag_csv(u2c, c2y, gt_dag, num_concepts, num_classes)
-    
-    # Save
+
+    # Save as noisy_dag_{action}_{level}.csv
     os.makedirs(config["output_dir"], exist_ok=True)
-    output_path = os.path.join(config["output_dir"], f"noisy_dag_{args.level}.csv")
+    output_path = os.path.join(config["output_dir"], f"noisy_dag_{args.action}_{args.level}.csv")
     dag_df.to_csv(output_path)
     
-    print(f"Saved noisy DAG to: {output_path}")
+    print(f"Saved noisy DAG to: {output_path}  [{args.action} {args.level}]")
     print(f"  Shape: {dag_df.shape}")
     print(f"  Total edges (True): {dag_df.values.sum()}")
     
