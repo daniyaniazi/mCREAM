@@ -1,0 +1,42 @@
+# Edge count experiment: u2c target=14 edges, seed=4
+# Scenario 1: fixed edge count, random which edges → boxplot per count
+mode: train_cbm
+seed: 42
+experiment_name: edge_count_u2c_14edges_seed4
+dataset_name: CelebA
+
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: true
+  return_images: true
+  class_name: unfair
+
+model_name: Standard_CelebA
+
+hyperparameters_model2:
+  num_classes: 1
+  num_exogenous: 75
+  num_side_channel: 5
+  num_concepts: 7
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: soft
+  side_dropout: true
+  dropout_prob: 0.1
+
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 20
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/edge_count_experiments/edge_count_u2c_14edges_seed4.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
