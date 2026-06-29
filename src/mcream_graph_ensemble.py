@@ -56,12 +56,17 @@ class UtoY_MultiGraph(UtoY_model):
         side_dropout: bool = True,
         dropout_prob: float = 0.9,
         mutually_exclusive_concepts: Optional[list] = None,
+        # ── Alpha soft-masking (new, off by default) ──────────────────────────
+        use_alpha: bool = False,           # True → SoftMaskedLinear instead of MaskedMLP
+        alpha_l1_weight: float = 0.001,   # γ: L1 sparsity weight on sigmoid(alpha)
         **kwargs: Any,
     ) -> None:
 
         # Store expert graphs before calling parent (parent calls init_concept_concept)
         self._expert_graphs = expert_graphs
         self.num_experts    = len(expert_graphs)
+        self.use_alpha      = use_alpha
+        self.alpha_l1_weight = alpha_l1_weight
 
         # Call parent with ref_graph — builds u2u_model, side_channel, last_layer
         # init_concept_concept() also runs here and creates self.u2c_model
@@ -88,18 +93,46 @@ class UtoY_MultiGraph(UtoY_model):
         del self.u2c_model
         input_per_concept = (num_exogenous - num_side_channel) // num_concepts
 
-        self.u2c_models = nn.ModuleList([
-            self._build_u2c_from_graph(g, input_per_concept, num_hidden_layers_in_maskedmlp)
-            for g in expert_graphs
-        ])
+        if use_alpha:
+            # ── Alpha path: shared learnable edge importance [K, K] ───────────
+            # sigmoid(alpha_logits[i,j]) ∈ (0,1) = importance of edge i→j
+            # Init at 0 so sigmoid(0)=0.5 — uninformative start, let gradient decide
+            self._alpha_logits = nn.Parameter(torch.zeros(num_concepts, num_concepts))
+
+            # SoftMaskedLinear uses alpha to gate each expert's binary mask softly
+            self.u2c_models = nn.ModuleList([
+                SoftMaskedLinear(
+                    K=num_concepts,
+                    D=input_per_concept,
+                    binary_graph=g[:-num_classes, :-num_classes],
+                    alpha_logits=self._alpha_logits,   # shared reference across all M
+                )
+                for g in expert_graphs
+            ])
+        else:
+            # ── Original path: hard binary MaskedMLP per expert ───────────────
+            self.u2c_models = nn.ModuleList([
+                self._build_u2c_from_graph(g, input_per_concept, num_hidden_layers_in_maskedmlp)
+                for g in expert_graphs
+            ])
 
         # Learnable per-expert concept loss weights λ_m (Kavya: multi-task learning style)
         # Random init breaks symmetry so gradients can differentiate experts.
         # Softmax ensures weights sum to 1 and stay positive.
-        # Using small random noise: experts start near-uniform but can diverge.
         self._lambda_logits = nn.Parameter(
             torch.randn(self.num_experts) * 0.1   # small random, softmax → near-uniform
         )
+
+    @property
+    def alpha_prob(self) -> Tensor:
+        """Edge importance probabilities [K, K] in (0,1). Only valid when use_alpha=True."""
+        if not self.use_alpha:
+            raise AttributeError("alpha_prob only available when use_alpha=True")
+        return torch.sigmoid(self._alpha_logits)
+
+    def alpha_l1_loss(self) -> Tensor:
+        """L1 sparsity penalty on alpha. Only valid when use_alpha=True."""
+        return self.alpha_prob.sum()
 
     def _build_u2c_from_graph(
         self,
@@ -329,6 +362,8 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         num_hidden_layers_in_maskedmlp: int = 0,
         mutually_exclusive_concepts: Optional[list] = None,
         frozen_backbone: bool = True,
+        use_alpha: bool = False,          # True → soft alpha masking
+        alpha_l1_weight: float = 0.001,  # L1 weight on sigmoid(alpha)
     ):
         if frozen_backbone:
             freeze_model(backbone)
@@ -353,6 +388,8 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
             dropout_prob=dropout_prob,
             num_hidden_layers_in_maskedmlp=num_hidden_layers_in_maskedmlp,
             mutually_exclusive_concepts=mutually_exclusive_concepts,
+            use_alpha=use_alpha,
+            alpha_l1_weight=alpha_l1_weight,
         )
 
         super().__init__(
@@ -466,7 +503,13 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
                                  num_labels=self.num_concepts)
         concept_preds = (c_avg > 0.5).int()
 
-        total_loss        = task_loss + self.lambda_weight * per_expert_concept_loss
+        # ── Alpha L1 regularization (only when use_alpha=True) ───────────────
+        if self.u_to_CY.use_alpha:
+            alpha_reg  = self.u_to_CY.alpha_l1_loss() * self.u_to_CY.alpha_l1_weight
+            total_loss = task_loss + self.lambda_weight * per_expert_concept_loss + alpha_reg
+        else:
+            total_loss = task_loss + self.lambda_weight * per_expert_concept_loss
+
         task_loss_percent = task_loss / total_loss * 100
 
         return (
@@ -479,4 +522,76 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
             total_loss,
             task_loss_percent,
         )
+
+
+# =============================================================================
+# SoftMaskedLinear — used by UtoY_MultiGraph when use_alpha=True
+# Defined after mCREAM_GraphEnsemble to keep existing classes uncluttered
+# =============================================================================
+
+class SoftMaskedLinear(nn.Module):
+    """
+    Linear layer where the binary expert mask is softened by a shared alpha matrix.
+
+    For each directed edge i→j in the concept graph:
+        effective_contribution = alpha[i,j] * G_m[i,j] * W[j, i_dims] * Uc[i_dims]
+
+    alpha[i,j] = sigmoid(alpha_logits[i,j]) ∈ (0,1)
+        - high → concept i strongly influences concept j
+        - low  → edge is suppressed even if present in expert graph
+    G_m[i,j] = binary expert graph (structural zeros never overridden by alpha)
+
+    alpha_logits is a shared nn.Parameter owned by UtoY_AlphaGraph — passed in
+    as a reference so all M experts share the same alpha.
+    """
+
+    def __init__(
+        self,
+        K: int,                         # num_concepts
+        D: int,                         # input_per_concept (num_exogenous - num_side) // K
+        binary_graph: BoolTensor,       # [K, K] expert binary u2c graph
+        alpha_logits: nn.Parameter,     # [K, K] shared, owned externally
+    ):
+        super().__init__()
+        self.K = K
+        self.D = D
+        self.alpha_logits_ref = alpha_logits   # shared reference — NOT owned here
+
+        # Learnable weights — same shape as a dense linear [K, K*D]
+        self.weight = nn.Parameter(torch.randn(K, K * D) * 0.01)
+        self.bias   = nn.Parameter(torch.zeros(K))
+
+        # Hard structural mask from expert graph — fixed, never trained
+        #
+        # CREAM convention: G[i,j]=1 means edge i→j (concept i is INPUT to concept j)
+        # Weight matrix W shape: [K_out, K_in*D]
+        #   row j = output concept j
+        #   cols i*D:(i+1)*D = input dims of concept i
+        #
+        # So hard_mask[j, i*D:(i+1)*D] = G[i,j]  (is concept i an input to concept j?)
+        # Build by transposing G first: G.T[j,i] = G[i,j]
+        G = binary_graph.float()                           # [K, K]  G[i,j]=edge i→j
+        Gt = G.T                                           # [K, K]  Gt[j,i]=G[i,j]
+        hard = Gt.unsqueeze(-1).expand(K, K, D)           # [K, K, D]  hard[j,i,d]=G[i,j]
+        hard = hard.reshape(K, K * D)                     # [K, K*D]  hard[j, i*D+d]=G[i,j]
+        self.register_buffer('hard_mask', hard)
+
+    def forward(self, x: Tensor) -> Tensor:
+        # x: [B, K*D]  where x[:, i*D:(i+1)*D] = u-dims of concept i
+        alpha_prob = torch.sigmoid(self.alpha_logits_ref)          # [K, K] alpha[i,j]=importance of i→j
+
+        # Expand alpha to weight matrix shape [K_out, K_in*D]
+        # alpha_exp[j, i*D:(i+1)*D] = alpha[i,j]  (importance of edge i→j)
+        alpha_T = alpha_prob.T                                                 # [K, K]  alpha_T[j,i]=alpha[i,j]
+        alpha_exp = alpha_T.unsqueeze(-1).expand(self.K, self.K, self.D)      # [K, K, D]
+        alpha_exp = alpha_exp.reshape(self.K, self.K * self.D)                # [K, K*D]
+
+        # Soft mask: alpha gates ONLY edges present in expert graph
+        # G[i,j]=0 → hard_mask[j,i*D:]=0 → zero regardless of alpha ✓
+        # G[i,j]=1 → soft_mask[j,i*D:] = alpha[i,j] ∈ (0,1) ✓
+        soft_mask = alpha_exp * self.hard_mask                                 # [K, K*D]
+
+        effective_W = self.weight * soft_mask                                  # [K, K*D]
+        return x @ effective_W.T + self.bias                                   # [B, K]
+
 
