@@ -520,7 +520,6 @@ def run_single_seed(config, config_path, seed):
     # alpha_prob [K, K]: learned edge importance probabilities in (0,1)
     # Saved as CSV with concept names as row/col headers for interpretability
     if getattr(model.u_to_CY, 'use_alpha', False):
-        import pandas as pd
         alpha_np = model.u_to_CY.alpha_prob.detach().cpu().numpy()  # [K, K]
 
         # Try to get concept names from DAG file
