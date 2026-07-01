@@ -547,13 +547,6 @@ def run_single_seed(config, config_path, seed):
         results["alpha_max"]     = float(alpha_np.max())
         results["alpha_sparsity"] = float((alpha_np < 0.1).mean())  # fraction near-zero
 
-    metrics_dir = (
-        Path(config["paths"]["default_root_dir"])
-        / "metrics" / dataset_name / "mCREAM_GraphEnsemble"
-    )
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    dict_to_csv(results, metrics_dir, config_path)
-    print(f"Results saved to: {metrics_dir}")
     return results
 
 
