@@ -57,8 +57,8 @@ class UtoY_MultiGraph(UtoY_model):
         dropout_prob: float = 0.9,
         mutually_exclusive_concepts: Optional[list] = None,
         # ── Alpha soft-masking (new, off by default) ──────────────────────────
-        use_alpha: bool = False,           # True → SoftMaskedLinear instead of MaskedMLP
-        alpha_l1_weight: float = 0.001,   # γ: L1 sparsity weight on sigmoid(alpha)
+        use_alpha: bool = False,            # True → SoftMaskedLinear instead of MaskedMLP
+        alpha_l1_weight: float = 0.0001,  # γ: L1 sparsity weight on sigmoid(alpha)
         **kwargs: Any,
     ) -> None:
 
@@ -96,8 +96,9 @@ class UtoY_MultiGraph(UtoY_model):
         if use_alpha:
             # ── Alpha path: shared learnable edge importance [K, K] ───────────
             # sigmoid(alpha_logits[i,j]) ∈ (0,1) = importance of edge i→j
-            # Init at 0 so sigmoid(0)=0.5 — uninformative start, let gradient decide
-            self._alpha_logits = nn.Parameter(torch.zeros(num_concepts, num_concepts))
+            # Init positive (sigmoid(1.0)=0.73): assume edges matter, let L1 prune.
+            # Zero init (0.5) lets L1 win too early before concept loss builds signal.
+            self._alpha_logits = nn.Parameter(torch.ones(num_concepts, num_concepts))
 
             # SoftMaskedLinear uses alpha to gate each expert's binary mask softly
             self.u2c_models = nn.ModuleList([
@@ -362,8 +363,8 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         num_hidden_layers_in_maskedmlp: int = 0,
         mutually_exclusive_concepts: Optional[list] = None,
         frozen_backbone: bool = True,
-        use_alpha: bool = False,          # True → soft alpha masking
-        alpha_l1_weight: float = 0.001,  # L1 weight on sigmoid(alpha)
+        use_alpha: bool = False,           # True → soft alpha masking
+        alpha_l1_weight: float = 0.0001, # L1 weight on sigmoid(alpha)
     ):
         if frozen_backbone:
             freeze_model(backbone)
@@ -557,8 +558,9 @@ class SoftMaskedLinear(nn.Module):
         self.D = D
         self.alpha_logits_ref = alpha_logits   # shared reference — NOT owned here
 
-        # Learnable weights — same shape as a dense linear [K, K*D]
-        self.weight = nn.Parameter(torch.randn(K, K * D) * 0.01)
+        # Learnable weights — init larger than default 0.01 so alpha gets
+        # meaningful gradient signal from concept loss before L1 suppresses it
+        self.weight = nn.Parameter(torch.randn(K, K * D) * 0.1)
         self.bias   = nn.Parameter(torch.zeros(K))
 
         # Hard structural mask from expert graph — fixed, never trained

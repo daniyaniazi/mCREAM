@@ -31,7 +31,7 @@ hyperparameters_model2:
   side_dropout: true
   dropout_prob: 0.9
   use_alpha: true
-  alpha_l1_weight: 0.001
+  alpha_l1_weight: 0.0001
 
 hyperparameters:
   learning_rate: 0.001
