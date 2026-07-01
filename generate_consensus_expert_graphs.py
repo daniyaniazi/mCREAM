@@ -49,7 +49,7 @@ DATASETS = {
 }
 
 # Base noise = how much GT is corrupted before private flips
-BASE_NOISE = {"low": 0.25, "medium": 0.50, "high": 0.75}
+BASE_NOISE = {"low": 0.15, "medium": 0.25, "high": 0.50}
 
 
 # ── Core generation ───────────────────────────────────────────────────────────
