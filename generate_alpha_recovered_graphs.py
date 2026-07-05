@@ -128,7 +128,12 @@ paths:
 def load_alpha_csvs(exp_dir: Path, level: str) -> np.ndarray | None:
     """Load all alpha_prob_seed*.csv for one experiment level, return mean [K,K]."""
     exp_name = f"graph_ensemble_consensus_{level}"
+    # Also check dynamic variant: graph_ensemble_consensus_dynamic_{level}
+    dynamic_name  = f"graph_ensemble_consensus_dynamic_{level}"
     consensus_dir = exp_dir / exp_name
+    if not consensus_dir.exists() and (exp_dir / dynamic_name).exists():
+        consensus_dir = exp_dir / dynamic_name
+        exp_name = dynamic_name
     if not consensus_dir.exists():
         print(f"  [SKIP] Not found: {consensus_dir}")
         return None, None
@@ -253,6 +258,9 @@ def main():
     parser.add_argument("--dataset",   choices=["cfmnist","celeba","cub","all"], default="cfmnist")
     parser.add_argument("--threshold", type=float, default=0.5,
                         help="Alpha binarisation threshold (default 0.5)")
+    parser.add_argument("--source",    choices=["static","dynamic","auto"], default="auto",
+                        help="Load alpha from static (consensus_0.9) or dynamic experiment. "
+                             "auto = use dynamic if exists, else static (default)")
     args = parser.parse_args()
 
     datasets = list(DATASETS.keys()) if args.dataset == "all" else [args.dataset]

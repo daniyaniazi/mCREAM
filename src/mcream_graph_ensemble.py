@@ -578,6 +578,17 @@ class SoftMaskedLinear(nn.Module):
         hard = hard.reshape(K, K * D)                     # [K, K*D]  hard[j, i*D+d]=G[i,j]
         self.register_buffer('hard_mask', hard)
 
+    def refresh_graph(self, new_binary_graph: BoolTensor) -> None:
+        """Replace hard_mask with a new expert graph in-place.
+        Called every N epochs by GraphRefreshCallback.
+        alpha_logits and weight W are NOT reset — they continue accumulating signal.
+        """
+        G  = new_binary_graph.float()
+        Gt = G.T
+        hard = Gt.unsqueeze(-1).expand(self.K, self.K, self.D)
+        hard = hard.reshape(self.K, self.K * self.D)
+        self.hard_mask.copy_(hard)   # in-place update of registered buffer
+
     def forward(self, x: Tensor) -> Tensor:
         # x: [B, K*D]  where x[:, i*D:(i+1)*D] = u-dims of concept i
         alpha_prob = torch.sigmoid(self.alpha_logits_ref)          # [K, K] alpha[i,j]=importance of i→j
@@ -597,3 +608,98 @@ class SoftMaskedLinear(nn.Module):
         return x @ effective_W.T + self.bias                                   # [B, K]
 
 
+# =============================================================================
+# Graph Refresh Callback — dynamic expert graph augmentation
+# =============================================================================
+
+class GraphRefreshCallback(pl.Callback):
+    """
+    Every `refresh_every` epochs, regenerate M new random expert graphs and
+    update the hard_mask in each SoftMaskedLinear — without touching alpha or W.
+
+    Why this helps:
+        Alpha accumulates gradient signal from MANY different random graphs.
+        GT edges are present in every graph → consistent gradient → alpha grows.
+        Noise-only edges differ every refresh → inconsistent gradient → L1 wins.
+
+    Only active when use_alpha=True. No-op otherwise.
+
+    Args:
+        dag_path:        path to GT DAG CSV
+        num_classes:     T — needed to extract u2c block from full graph
+        p_base:          base noise for consensus generation (shared by all experts)
+        p_private:       private noise per expert (controls pairwise consensus)
+        refresh_every:   regenerate graphs every this many epochs
+        base_seed:       starting seed; incremented each refresh for reproducibility
+    """
+
+    def __init__(
+        self,
+        dag_path: str,
+        num_classes: int,
+        p_base: float = 0.25,
+        p_private: float = 0.05,
+        refresh_every: int = 5,
+        base_seed: int = 1000,
+    ):
+        super().__init__()
+        self.dag_path      = dag_path
+        self.num_classes   = num_classes
+        self.p_base        = p_base
+        self.p_private     = p_private
+        self.refresh_every = refresh_every
+        self.base_seed     = base_seed
+        self._refresh_count = 0
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch + 1   # 1-indexed
+        if epoch % self.refresh_every != 0:
+            return
+
+        # Only act when use_alpha is enabled on the inner model
+        inner = getattr(pl_module, 'u_to_CY', None)
+        if inner is None or not getattr(inner, 'use_alpha', False):
+            return
+
+        import numpy as np
+        import pandas as pd
+        from pathlib import Path
+
+        # Load GT graph
+        gt_df  = pd.read_csv(self.dag_path, index_col=0)
+        gt_bool = (gt_df.values != 0).astype(int)
+        K = gt_bool.shape[0] - self.num_classes
+        G_star = gt_bool[:K, :K]
+
+        # Generate new consensus expert graphs
+        rng_base = np.random.default_rng(self.base_seed + self._refresh_count * 100)
+        # Base flip
+        total = K * K
+        diag  = np.array([i * K + i for i in range(K)])
+        pos   = np.setdiff1d(np.arange(total), diag)
+        n_base = max(1, int(len(pos) * self.p_base))
+        base_flip = rng_base.choice(pos, size=n_base, replace=False)
+        G_base = G_star.copy()
+        rows, cols = base_flip // K, base_flip % K
+        G_base[rows, cols] = 1 - G_base[rows, cols]
+
+        M = inner.num_experts
+        new_graphs = []
+        for m in range(M):
+            rng_m  = np.random.default_rng(self.base_seed + self._refresh_count * 100 + m + 1)
+            n_priv = max(1, int(len(pos) * self.p_private))
+            priv_flip = rng_m.choice(pos, size=n_priv, replace=False)
+            G_m = G_base.copy()
+            pr, pc = priv_flip // K, priv_flip % K
+            G_m[pr, pc] = 1 - G_m[pr, pc]
+            new_graphs.append(torch.tensor(G_m.astype(bool), dtype=torch.bool))
+
+        # Update hard_mask in each SoftMaskedLinear
+        device = next(pl_module.parameters()).device
+        for m, u2c_m in enumerate(inner.u2c_models):
+            if hasattr(u2c_m, 'refresh_graph'):
+                u2c_m.refresh_graph(new_graphs[m].to(device))
+
+        self._refresh_count += 1
+        print(f'[GraphRefresh] epoch={epoch}  refresh #{self._refresh_count}  '
+              f'p_base={self.p_base}  p_private={self.p_private}')

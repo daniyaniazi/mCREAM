@@ -9,31 +9,34 @@
 #   python generate_consensus_expert_graphs.py --dataset celeba  --consensus 0.90
 #
 # USAGE:
-#   ./submit_graph_ensemble_consensus.sh                          # cfmnist, all levels
+#   ./submit_graph_ensemble_consensus.sh                          # cfmnist, static, all levels
+#   ./submit_graph_ensemble_consensus.sh --dynamic                # cfmnist, dynamic graph refresh
 #   ./submit_graph_ensemble_consensus.sh --dataset celeba         # celeba, all levels
-#   ./submit_graph_ensemble_consensus.sh --dataset all            # both datasets
-#   ./submit_graph_ensemble_consensus.sh --level low              # cfmnist, low only
-#   ./submit_graph_ensemble_consensus.sh --dataset celeba --level high medium
+#   ./submit_graph_ensemble_consensus.sh --dataset all            # all datasets
+#   ./submit_graph_ensemble_consensus.sh --level low              # low only
+#   ./submit_graph_ensemble_consensus.sh --dynamic --level low    # dynamic, low only
 
 set -euo pipefail
 cd ~/mCREAM
 
 PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
 COUNT=0
-DATASET="cfmnist"          # default
-LEVELS="low medium high"   # default: all three
+DATASET="cfmnist"
+LEVELS="low medium high"
+DYNAMIC=false
 
 # Parse args
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dataset) DATASET="$2"; shift 2 ;;
+        --dynamic) DYNAMIC=true; shift ;;
         --level)
             LEVELS=""
             shift
             while [[ $# -gt 0 ]] && [[ "$1" != --* ]]; do
                 LEVELS="$LEVELS $1"; shift
             done
-            LEVELS="${LEVELS# }"  # trim leading space
+            LEVELS="${LEVELS# }"
             ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
@@ -50,6 +53,7 @@ echo "=============================================="
 echo "mCREAM Graph Ensemble — Exp4 Consensus 90%"
 echo "  datasets: $DATASETS"
 echo "  levels:   $LEVELS"
+echo "  dynamic:  $DYNAMIC"
 echo "  use_alpha=True  |  5 seeds per job"
 echo "=============================================="
 
@@ -94,7 +98,11 @@ queue 1" | condor_submit
 }
 
 for DS in $DATASETS; do
-    submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_0.9" "$LEVELS"
+    if [ "$DYNAMIC" = true ]; then
+        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_dynamic" "$LEVELS"
+    else
+        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_0.9" "$LEVELS"
+    fi
 done
 
 echo ""

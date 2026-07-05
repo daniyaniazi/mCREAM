@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Submit CREAM on alpha-recovered graphs (Exp5).
-# Reads configs from all_configs/cream_alpha_{dataset}/
+# Reads configs from all_configs/cream_alpha_{dataset}[_dynamic]/
 #
-# PREREQUISITES:
+# PREREQUISITES (static Exp4):
 #   python generate_alpha_recovered_graphs.py --dataset cfmnist --threshold 0.5
+# PREREQUISITES (dynamic Exp4):
+#   python generate_alpha_recovered_graphs.py --dataset cfmnist --threshold 0.5 --source dynamic
 #
 # USAGE:
-#   ./submit_cream_alpha.sh                    # cfmnist, all levels
-#   ./submit_cream_alpha.sh --dataset celeba   # celeba only
-#   ./submit_cream_alpha.sh --dataset cub      # cub only
-#   ./submit_cream_alpha.sh --dataset all      # all datasets
-#   ./submit_cream_alpha.sh --level low        # low only
+#   ./submit_cream_alpha.sh                         # cfmnist static, all levels
+#   ./submit_cream_alpha.sh --dynamic               # cfmnist dynamic alpha
+#   ./submit_cream_alpha.sh --dataset celeba         # celeba static
+#   ./submit_cream_alpha.sh --dataset all            # all datasets static
+#   ./submit_cream_alpha.sh --dataset all --dynamic  # all datasets dynamic
+#   ./submit_cream_alpha.sh --level low              # low only
 
 set -euo pipefail
 cd ~/mCREAM
@@ -19,10 +22,12 @@ PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
 COUNT=0
 DATASET="cfmnist"
 LEVELS="low medium high"
+DYNAMIC=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dataset) DATASET="$2"; shift 2 ;;
+        --dynamic) DYNAMIC=true; shift ;;
         --level)
             LEVELS=""
             shift
@@ -43,11 +48,15 @@ fi
 
 echo "=============================================="
 echo "CREAM on Alpha-Recovered Graphs (Exp5)"
-echo "  datasets: $DATASETS  |  levels: $LEVELS"
+echo "  datasets: $DATASETS  |  levels: $LEVELS  |  dynamic: $DYNAMIC"
 echo "=============================================="
 
 for DS in $DATASETS; do
-    CONFIG_DIR="all_configs/cream_alpha_${DS}"
+    if [ "$DYNAMIC" = true ]; then
+        CONFIG_DIR="all_configs/cream_alpha_${DS}_dynamic"
+    else
+        CONFIG_DIR="all_configs/cream_alpha_${DS}"
+    fi
     if [ ! -d "$CONFIG_DIR" ]; then
         echo "  [SKIP] $CONFIG_DIR not found — run generate_alpha_recovered_graphs.py first"
         continue

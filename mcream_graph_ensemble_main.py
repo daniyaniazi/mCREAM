@@ -27,7 +27,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils import get_component_with_dicts, load_config, dict_to_csv
-from src.mcream_graph_ensemble import mCREAM_GraphEnsemble
+from src.mcream_graph_ensemble import mCREAM_GraphEnsemble, GraphRefreshCallback
 from src.expert_graphs.generation import (
     load_expert_graphs,
     generate_single_action_experts,
@@ -274,11 +274,28 @@ def run_single_seed(config, config_path, seed):
         / experiment_name / f"seed_{seed}"
     )
 
+    # ── Graph refresh callback (only when use_alpha=True and dynamic_graphs=True) ──
+    callbacks = []
+    dyn = config.get("dynamic_graphs", {})
+    if hparams.get("use_alpha", False) and dyn.get("enabled", False):
+        refresh_cb = GraphRefreshCallback(
+            dag_path      = config["paths"]["DAG_file"],
+            num_classes   = T,
+            p_base        = dyn.get("p_base",        0.25),
+            p_private     = dyn.get("p_private",     0.05),
+            refresh_every = dyn.get("refresh_every", 5),
+            base_seed     = seed * 1000,   # different base per training seed
+        )
+        callbacks.append(refresh_cb)
+        print(f"GraphRefresh enabled: every {dyn.get('refresh_every',5)} epochs  "
+              f"p_base={dyn.get('p_base',0.25)}  p_private={dyn.get('p_private',0.05)}")
+
     trainer = pl.Trainer(
         max_epochs=config["trainer_param"]["max_epochs"],
         default_root_dir=default_root_dir,
         deterministic=True,
         enable_progress_bar=True,
+        callbacks=callbacks if callbacks else None,
     )
 
     peak_gpu = 0.0
