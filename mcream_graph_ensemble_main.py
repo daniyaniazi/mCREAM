@@ -274,6 +274,7 @@ def run_single_seed(config, config_path, seed):
         / experiment_name / f"seed_{seed}"
     )
 
+    # Check commit
     # ── Graph refresh callback (only when use_alpha=True and dynamic_graphs=True) ──
     callbacks = []
     dyn = config.get("dynamic_graphs", {})
