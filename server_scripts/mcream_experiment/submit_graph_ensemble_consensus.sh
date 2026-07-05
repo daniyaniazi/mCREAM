@@ -41,7 +41,7 @@ done
 
 # Resolve datasets list
 if [ "$DATASET" = "all" ]; then
-    DATASETS="cfmnist celeba"
+    DATASETS="cfmnist celeba cub"
 else
     DATASETS="$DATASET"
 fi

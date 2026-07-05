@@ -46,6 +46,12 @@ DATASETS = {
         "num_experts": 5,
         "output_base": "data/CelebA/expert_graphs/consensus",
     },
+    "cub": {
+        "dag_path":    "data/CUB/CUB_DAG_only_Gc.csv",
+        "num_classes": 200,
+        "num_experts": 5,
+        "output_base": "data/CUB/expert_graphs/consensus",
+    },
 }
 
 # Base noise = how much GT is corrupted before private flips
@@ -212,7 +218,7 @@ def generate_for_dataset(dataset_name: str, consensus: float, M: int = None,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset",   choices=["cfmnist", "celeba", "all"], default="cfmnist")
+    parser.add_argument("--dataset",   choices=["cfmnist", "celeba", "cub", "all"], default="cfmnist")
     parser.add_argument("--consensus", type=float, default=0.90,
                         help="Target pairwise consensus (default 0.90 = 90%%)")
     parser.add_argument("--num_experts", type=int, default=None)

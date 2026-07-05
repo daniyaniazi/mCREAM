@@ -1,0 +1,49 @@
+# mCREAM Graph Ensemble - CUB - consensus 90% - medium base noise
+# 112 concepts, 200 classes, group_soft, use_alpha=True
+mode: train_cbm
+seed: 42
+seeds: [42, 7, 1, 134, 89]
+dataset_name: CUB
+
+dataset_params:
+  batch_size: 64
+  workers: 2
+  return_concepts: true
+
+backbone_model: Standard_CUB
+
+multi_expert:
+  num_experts: 5
+  noise_type: consensus
+  noise_level: medium
+  consensus: 0.9
+
+hyperparameters_model2:
+  num_classes: 200
+  num_concepts: 112
+  num_exogenous: 648
+  num_side_channel: 200
+  concept_representation: group_soft
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  side_dropout: true
+  dropout_prob: 0.8
+  use_alpha: true
+  alpha_l1_weight: 0.0001
+
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 300
+
+experiment_name: graph_ensemble_consensus_medium
+
+paths:
+  default_root_dir: ./experiments/
+  DAG_file: ./data/CUB/CUB_DAG_only_Gc.csv
+  expert_graphs_dir: ./data/CUB/expert_graphs/consensus/medium/
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
