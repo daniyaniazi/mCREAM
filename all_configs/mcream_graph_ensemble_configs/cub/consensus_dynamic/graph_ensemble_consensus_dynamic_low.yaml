@@ -4,7 +4,7 @@ seeds: [42, 7, 1, 134, 89]
 dataset_name: CUB
 dataset_params:
   batch_size: 64
-  workers: 2
+  workers: 1
   return_concepts: true
 backbone_model: Standard_CUB
 multi_expert:

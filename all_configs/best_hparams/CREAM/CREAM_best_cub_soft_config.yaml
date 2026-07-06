@@ -1,9 +1,9 @@
 mode: train_cbm
-seed: [42,7,1,134,89]
+seed: 42
 dataset_name: CUB
 dataset_params:
   batch_size: 64
-  workers: 2
+  workers: 1
   return_concepts: true
 model_name: Standard_CUB
 paths:

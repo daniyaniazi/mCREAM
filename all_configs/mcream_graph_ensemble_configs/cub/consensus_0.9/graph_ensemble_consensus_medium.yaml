@@ -7,7 +7,7 @@ dataset_name: CUB
 
 dataset_params:
   batch_size: 64
-  workers: 2
+  workers: 1
   return_concepts: true
 
 backbone_model: Standard_CUB
