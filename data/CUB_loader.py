@@ -167,7 +167,7 @@ class CUBDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.workers,
-            persistent_workers=True,
+            persistent_workers=(self.workers > 0),
             pin_memory=True,
         )
 
@@ -177,7 +177,7 @@ class CUBDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.workers,
-            persistent_workers=True,
+            persistent_workers=(self.workers > 0),
             pin_memory=True,
         )
 
@@ -187,7 +187,7 @@ class CUBDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.workers,
-            persistent_workers=True,
+            persistent_workers=(self.workers > 0),
             pin_memory=True,
         )
 
@@ -197,6 +197,6 @@ class CUBDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.workers,
-            persistent_workers=True,
+            persistent_workers=(self.workers > 0),
             pin_memory=True,
         )

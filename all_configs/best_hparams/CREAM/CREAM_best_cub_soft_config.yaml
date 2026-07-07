@@ -3,7 +3,7 @@ seed: 42
 dataset_name: CUB
 dataset_params:
   batch_size: 64
-  workers: 1
+  workers: 0
   return_concepts: true
 model_name: Standard_CUB
 paths:
