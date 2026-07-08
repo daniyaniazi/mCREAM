@@ -35,6 +35,8 @@ DATASETS = {
         "model_name":      "Standard_FashionMNIST",
         "ckpt":            "./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt",
         "softmax_mask":    "./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json",
+        "concept_rep": "group_soft",
+        "workers": 2,
         "hparams": {
             "num_classes": 10, "num_exogenous": 128, "num_side_channel": 40,
             "num_concepts": 11, "dropout_prob": 0.8, "max_epochs": 50,
@@ -52,6 +54,8 @@ DATASETS = {
         "model_name":      "Standard_CelebA",
         "ckpt":            "./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt",
         "softmax_mask":    None,
+        "concept_rep": "soft",   # CelebA: no mutex groups → soft not group_soft
+        "workers": 2,
         "hparams": {
             "num_classes": 1, "num_exogenous": 75, "num_side_channel": 5,
             "num_concepts": 7, "dropout_prob": 0.1, "max_epochs": 20,
@@ -69,6 +73,8 @@ DATASETS = {
         "model_name":      "Standard_CUB",
         "ckpt":            "./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt",
         "softmax_mask":    "./data/CUB/CUB_mutually_exclusive_concepts.json",
+        "concept_rep": "group_soft",
+        "workers": 0,   # CUB: workers=0 to avoid too many open files (113 intervention calls)
         "hparams": {
             "num_classes": 200, "num_exogenous": 648, "num_side_channel": 200,
             "num_concepts": 112, "dropout_prob": 0.8, "max_epochs": 300,
@@ -84,13 +90,12 @@ CONFIG_TEMPLATE = """\
 # Alpha threshold: {threshold}  |  Edges recovered: {n_edges} / {n_gt_edges} GT edges
 mode: train_cbm
 seed: 42
-seeds: [42, 7, 1, 134, 89]
 experiment_name: cream_alpha_{level}
 dataset_name: {dataset_name}
 
 dataset_params:
   batch_size: {batch_size}
-  workers: 2
+  workers: {workers}
   return_labels: true
   return_images: true{celeba_extra}
 
@@ -105,7 +110,7 @@ hyperparameters_model2:
   num_hidden_layers_in_maskedmlp: 0
   previous_model_output_size: {prev_size}
   last_layer_mask: true
-  concept_representation: group_soft
+  concept_representation: {concept_rep}
   side_dropout: true
   dropout_prob: {dropout_prob}
 
@@ -232,7 +237,9 @@ def process_dataset(ds_name: str, threshold: float):
             dataset_name=cfg["dataset_name"],
             model_name=cfg["model_name"],
             batch_size=h["batch_size"],
+            workers=cfg.get("workers", 2),
             celeba_extra=celeba_extra,
+            concept_rep=cfg.get("concept_rep", "group_soft"),
             num_classes=h["num_classes"],
             num_exogenous=h["num_exogenous"],
             num_side_channel=h["num_side_channel"],

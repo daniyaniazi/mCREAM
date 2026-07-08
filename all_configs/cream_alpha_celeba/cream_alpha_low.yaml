@@ -2,7 +2,6 @@
 # Alpha threshold: 0.4  |  Edges recovered: 19 / 10 GT edges
 mode: train_cbm
 seed: 42
-seeds: [42, 7, 1, 134, 89]
 experiment_name: cream_alpha_low
 dataset_name: CelebA
 
@@ -24,7 +23,7 @@ hyperparameters_model2:
   num_hidden_layers_in_maskedmlp: 0
   previous_model_output_size: 512
   last_layer_mask: true
-  concept_representation: group_soft
+  concept_representation: soft
   side_dropout: true
   dropout_prob: 0.1
 
