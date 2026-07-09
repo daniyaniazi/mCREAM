@@ -237,8 +237,15 @@ def count_maskedmlp_params(model):
 
 
 def run_benchmark(model, data_loader):
-    # ensure everyone has 1 worker
-    data_loader.num_workers = 1
+    # Recreate dataloader with num_workers=1; patching the attribute doesn't work
+    # because prefetch_factor stays None (set only when num_workers>0 at construction)
+    data_loader = DataLoader(
+        data_loader.dataset,
+        batch_size=data_loader.batch_size,
+        shuffle=False,
+        num_workers=1,
+        pin_memory=data_loader.pin_memory,
+    )
     num_iterations = 20
     burnin_iterations = 5
 
