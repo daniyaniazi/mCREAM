@@ -1,0 +1,42 @@
+# CREAM on alpha-recovered graph — cub high noise
+# Alpha threshold: 0.4  |  Edges recovered: 7021 / 7488 GT edges
+mode: train_cbm
+seed: 42
+experiment_name: cream_alpha_high
+dataset_name: CUB
+
+dataset_params:
+  batch_size: 64
+  workers: 0
+  return_labels: true
+  return_images: true
+
+model_name: Standard_CUB
+
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 648
+  num_side_channel: 200
+  num_concepts: 112
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+
+trainer_param:
+  max_epochs: 300
+
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CUB/alpha_recovered_dags/alpha_dag_high_t0.40.csv
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
