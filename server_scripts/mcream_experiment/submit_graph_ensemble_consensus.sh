@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
-# Exp4: mCREAM Graph Ensemble — consensus expert graphs with shared alpha matrix.
-# 3 noise levels (low/medium/high), 5 training seeds each = 3 jobs per dataset.
-# Each expert graph has 90% pairwise consensus with others.
-# use_alpha=True: shared learnable edge importance matrix trained end-to-end.
+# mCREAM Graph Ensemble — Consensus expert graphs with shared alpha matrix.
+#
+# Modes:
+#   static   (Exp4): fixed consensus graphs, 3 levels
+#   dynamic  (Exp5): graphs refreshed every N epochs, 3 levels
+#   hparam   (Exp5-hparam): dynamic + grid over epochs/lambda/loss_type
 #
 # PREREQUISITES (run once on server):
-#   python generate_consensus_expert_graphs.py --dataset cfmnist --consensus 0.90
-#   python generate_consensus_expert_graphs.py --dataset celeba  --consensus 0.90
+#   python generate_consensus_expert_graphs.py --dataset cfmnist --consensus 0.90 --force
+#   python generate_consensus_expert_graphs.py --dataset celeba  --consensus 0.90 --force
+#   python generate_consensus_expert_graphs.py --dataset cub     --consensus 0.90 --force
+#   (--force needed because BASE_NOISE changed to low=0.10 medium=0.15 high=0.35)
 #
 # USAGE:
 #   ./submit_graph_ensemble_consensus.sh                          # cfmnist, static, all levels
-#   ./submit_graph_ensemble_consensus.sh --dynamic                # cfmnist, dynamic graph refresh
-#   ./submit_graph_ensemble_consensus.sh --dataset celeba         # celeba, all levels
-#   ./submit_graph_ensemble_consensus.sh --dataset all            # all datasets
-#   ./submit_graph_ensemble_consensus.sh --level low              # low only
-#   ./submit_graph_ensemble_consensus.sh --dynamic --level low    # dynamic, low only
+#   ./submit_graph_ensemble_consensus.sh --dynamic                # cfmnist, dynamic, all levels
+#   ./submit_graph_ensemble_consensus.sh --hparam                 # cfmnist, dynamic hparam grid
+#   ./submit_graph_ensemble_consensus.sh --hparam --dataset all   # all datasets, hparam grid
+#   ./submit_graph_ensemble_consensus.sh --dataset celeba         # celeba, static
+#   ./submit_graph_ensemble_consensus.sh --dataset all            # all datasets, static
+#   ./submit_graph_ensemble_consensus.sh --level low              # low noise only
+#   ./submit_graph_ensemble_consensus.sh --hparam --level high    # hparam grid, high only
+#   ./submit_graph_ensemble_consensus.sh --hparam --epochs 300    # hparam grid, 300 epochs only
+#   ./submit_graph_ensemble_consensus.sh --hparam --loss orig     # hparam grid, per_expert loss only
 
 set -euo pipefail
 cd ~/mCREAM
@@ -22,27 +30,44 @@ cd ~/mCREAM
 PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
 COUNT=0
 DATASET="cfmnist"
-LEVELS="low medium high"
+LEVELS=""          # empty = all
 DYNAMIC=false
+HPARAM=false
+FILTER_EPOCHS=""   # empty = all
+FILTER_LOSS=""     # empty = all
 
-# Parse args
+# ── Parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dataset) DATASET="$2"; shift 2 ;;
         --dynamic) DYNAMIC=true; shift ;;
+        --hparam)  HPARAM=true; DYNAMIC=true; shift ;;
         --level)
-            LEVELS=""
             shift
             while [[ $# -gt 0 ]] && [[ "$1" != --* ]]; do
                 LEVELS="$LEVELS $1"; shift
             done
             LEVELS="${LEVELS# }"
             ;;
+        --epochs)
+            shift
+            while [[ $# -gt 0 ]] && [[ "$1" != --* ]]; do
+                FILTER_EPOCHS="$FILTER_EPOCHS $1"; shift
+            done
+            FILTER_EPOCHS="${FILTER_EPOCHS# }"
+            ;;
+        --loss)
+            shift
+            while [[ $# -gt 0 ]] && [[ "$1" != --* ]]; do
+                FILTER_LOSS="$FILTER_LOSS $1"; shift
+            done
+            FILTER_LOSS="${FILTER_LOSS# }"
+            ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
 
-# Resolve datasets list
+# Resolve datasets
 if [ "$DATASET" = "all" ]; then
     DATASETS="cfmnist celeba cub"
 else
@@ -50,32 +75,56 @@ else
 fi
 
 echo "=============================================="
-echo "mCREAM Graph Ensemble — Exp4 Consensus 90%"
+echo "mCREAM Graph Ensemble — Consensus 90%"
 echo "  datasets: $DATASETS"
-echo "  levels:   $LEVELS"
-echo "  dynamic:  $DYNAMIC"
+echo "  levels:   ${LEVELS:-all}"
+echo "  mode:     $([ "$HPARAM" = true ] && echo "hparam-grid" || ([ "$DYNAMIC" = true ] && echo "dynamic" || echo "static"))"
+[ -n "$FILTER_EPOCHS" ] && echo "  epochs filter: $FILTER_EPOCHS"
+[ -n "$FILTER_LOSS"   ] && echo "  loss filter:   $FILTER_LOSS"
 echo "  use_alpha=True  |  5 seeds per job"
 echo "=============================================="
 
+# ── submit_dir: submit all matching .yaml files from a config directory ───────
 submit_dir() {
-    SD_DIR="$1"
-    SD_FILTER="$2"   # space-separated levels to include, empty=all
-    if [ ! -d "$SD_DIR" ]; then
-        echo "  [SKIP] Dir not found: $SD_DIR"; return
+    local DIR="$1"
+    if [ ! -d "$DIR" ]; then
+        echo "  [SKIP] Dir not found: $DIR"; return
     fi
-    CONFIG_DIR="$SD_DIR"
-    echo "  Submitting from: $CONFIG_DIR"
-    for CONFIG in "$CONFIG_DIR"/*.yaml; do
+    echo "  Submitting from: $DIR"
+    local submitted=0
+    for CONFIG in "$DIR"/*.yaml; do
         [ -f "$CONFIG" ] || continue
         BASE=$(basename "$CONFIG" .yaml)
-        # Filter by level if specified
-        if [ -n "$SD_FILTER" ]; then
+
+        # ── Level filter ──────────────────────────────────────────────────────
+        if [ -n "$LEVELS" ]; then
             MATCH=false
-            for LV in $SD_FILTER; do
-                [[ "$BASE" == *"_${LV}" ]] && MATCH=true && break
+            for LV in $LEVELS; do
+                # match _low / _low_ (for hparam names like ..._low_ep300_...)
+                [[ "$BASE" == *"_${LV}_"* ]] && MATCH=true && break
+                [[ "$BASE" == *"_${LV}" ]]   && MATCH=true && break
             done
             [ "$MATCH" = false ] && continue
         fi
+
+        # ── Epochs filter (hparam mode only) ─────────────────────────────────
+        if [ -n "$FILTER_EPOCHS" ]; then
+            MATCH=false
+            for EP in $FILTER_EPOCHS; do
+                [[ "$BASE" == *"_ep${EP}_"* ]] && MATCH=true && break
+            done
+            [ "$MATCH" = false ] && continue
+        fi
+
+        # ── Loss type filter (hparam mode only) ───────────────────────────────
+        if [ -n "$FILTER_LOSS" ]; then
+            MATCH=false
+            for LS in $FILTER_LOSS; do
+                [[ "$BASE" == *"_${LS}" ]] && MATCH=true && break
+            done
+            [ "$MATCH" = false ] && continue
+        fi
+
         echo "  → $BASE"
         echo "universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
@@ -94,19 +143,24 @@ requirements            = UidDomain == \"cs.uni-saarland.de\"
 +WantGPUHomeMounted     = true
 queue 1" | condor_submit
         COUNT=$((COUNT + 1))
+        submitted=$((submitted + 1))
     done
+    echo "    submitted $submitted jobs from $DIR"
 }
 
+# ── Main loop ─────────────────────────────────────────────────────────────────
 for DS in $DATASETS; do
-    if [ "$DYNAMIC" = true ]; then
-        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_dynamic" "$LEVELS"
+    if [ "$HPARAM" = true ]; then
+        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_dynamic_hparam"
+    elif [ "$DYNAMIC" = true ]; then
+        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_dynamic"
     else
-        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_0.9" "$LEVELS"
+        submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_0.9"
     fi
 done
 
 echo ""
-echo "Submitted $COUNT jobs (each runs 5 seeds, saves alpha matrix per seed)"
-echo "Results: experiments/.../mCREAM_GraphEnsemble/graph_ensemble_consensus_*/"
+echo "Submitted $COUNT jobs total (each runs 5 seeds)"
+echo "Results: experiments/.../mCREAM_GraphEnsemble/graph_ensemble_consensus_dynamic_*/"
 echo "Alpha:   experiments/.../seed_*/lightning_logs/version_0/alpha_prob_seed*.csv"
 [ $COUNT -gt 0 ] && condor_q

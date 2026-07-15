@@ -55,7 +55,8 @@ DATASETS = {
 }
 
 # Base noise = how much GT is corrupted before private flips
-BASE_NOISE = {"low": 0.15, "medium": 0.25, "high": 0.50}
+# low ≈ 10% of edges flipped, medium ≈ 15%, high ≈ 35%
+BASE_NOISE = {"low": 0.10, "medium": 0.15, "high": 0.35}
 
 
 # ── Core generation ───────────────────────────────────────────────────────────
@@ -132,23 +133,20 @@ def verify_consensus(experts: list[np.ndarray]) -> float:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def generate_for_dataset(dataset_name: str, consensus: float, M: int = None,
-                         levels: list = None):
+                         levels: list = None, force: bool = False):
     cfg        = DATASETS[dataset_name]
     dag_path   = cfg["dag_path"]
     num_classes = cfg["num_classes"]
     M          = M or cfg["num_experts"]
     output_base = cfg["output_base"]
 
-    # private flip q that gives target consensus: 1 - 2q(1-q) = consensus
-    # → q = (1 - sqrt(2*consensus - 1)) / 2   (smaller root)
-    # Simpler: just use fixed q=0.05 for ~90% consensus, q=0.10 for ~82%
     p_private = (1 - (2 * consensus - 1) ** 0.5) / 2
     print(f"\n{'='*60}")
     print(f"Dataset: {dataset_name}  |  M={M}")
     print(f"Target consensus: {consensus:.0%}  →  private flip q={p_private:.3f}")
+    print(f"BASE_NOISE: {BASE_NOISE}")
     print(f"{'='*60}")
 
-    # Load GT
     u2c_star, c2y_star = load_and_split_dag(dag_path, num_classes)
     G_star = u2c_star.numpy().astype(int)
     K = G_star.shape[0]
@@ -157,9 +155,13 @@ def generate_for_dataset(dataset_name: str, consensus: float, M: int = None,
     run_levels = {k: v for k, v in BASE_NOISE.items() if levels is None or k in levels}
     for level, p_base in run_levels.items():
         output_dir = Path(output_base) / f"{level}"
-        if (output_dir / "config.yaml").exists():
-            print(f"  [SKIP] {level} — already exists at {output_dir}")
+        if (output_dir / "config.yaml").exists() and not force:
+            print(f"  [SKIP] {level} — already exists at {output_dir}  (use --force to overwrite)")
             continue
+        if force and output_dir.exists():
+            import shutil
+            shutil.rmtree(output_dir)
+            print(f"  [FORCE] removed existing {output_dir}")
 
         print(f"\n  Generating {level} (p_base={p_base}, p_private={p_private:.3f})...")
 
@@ -224,11 +226,13 @@ def main():
     parser.add_argument("--num_experts", type=int, default=None)
     parser.add_argument("--levels", nargs="+", choices=["low","medium","high"], default=None,
                         help="Which noise levels to generate (default: all three)")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite existing graph directories")
     args = parser.parse_args()
 
     datasets = list(DATASETS.keys()) if args.dataset == "all" else [args.dataset]
     for ds in datasets:
-        generate_for_dataset(ds, args.consensus, args.num_experts, args.levels)
+        generate_for_dataset(ds, args.consensus, args.num_experts, args.levels, args.force)
 
 
 if __name__ == "__main__":

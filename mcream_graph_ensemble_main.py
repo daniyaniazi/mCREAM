@@ -265,6 +265,7 @@ def run_single_seed(config, config_path, seed):
         frozen_backbone=config["hyperparameters"].get("frozen_model1", True),
         use_alpha=hparams.get("use_alpha", False),
         alpha_l1_weight=hparams.get("alpha_l1_weight", 0.001),
+        loss_type=config.get("loss_type", "per_expert"),
     )
 
     experiment_name = config.get("experiment_name", config_path.stem)

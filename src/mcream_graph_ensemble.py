@@ -365,7 +365,9 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         frozen_backbone: bool = True,
         use_alpha: bool = False,           # True → soft alpha masking
         alpha_l1_weight: float = 0.0001, # L1 weight on sigmoid(alpha)
+        loss_type: str = "per_expert",   # "per_expert" | "ensemble" | "both"
     ):
+        self._loss_type = loss_type
         if frozen_backbone:
             freeze_model(backbone)
 
@@ -391,6 +393,7 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
             mutually_exclusive_concepts=mutually_exclusive_concepts,
             use_alpha=use_alpha,
             alpha_l1_weight=alpha_l1_weight,
+            loss_type=loss_type,
         )
 
         super().__init__(
@@ -464,10 +467,18 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         c_logits_agg     = (lambdas[:, None, None] * c_logits_stacked).sum(dim=0)  # [B, K]
         c_avg            = self.u_to_CY.concept_activation_function(c_logits_agg)  # [B, K]
 
-        ensemble_bce = F.binary_cross_entropy(
+        ensemble_concept_loss = F.binary_cross_entropy(
             c_avg.clamp(1e-7, 1 - 1e-7), target_concepts.float()
-        ).item()
-        # per_expert_concept_loss = per_expert_concept_loss + ensemble_concept_loss  # disabled: only per-expert losses used
+        )
+        ensemble_bce = ensemble_concept_loss.item()
+
+        loss_type = getattr(self, '_loss_type', 'per_expert')
+        if loss_type == 'per_expert':
+            concept_loss_for_backprop = per_expert_concept_loss
+        elif loss_type == 'ensemble':
+            concept_loss_for_backprop = ensemble_concept_loss
+        else:  # 'both'
+            concept_loss_for_backprop = per_expert_concept_loss + ensemble_concept_loss
 
         # ── Loss logging ──────────────────────────────────────────────────────
         if getattr(self, '_debug_loss', False):
@@ -507,9 +518,9 @@ class mCREAM_GraphEnsemble(Template_CBM_MultiClass):
         # ── Alpha L1 regularization (only when use_alpha=True) ───────────────
         if self.u_to_CY.use_alpha:
             alpha_reg  = self.u_to_CY.alpha_l1_loss() * self.u_to_CY.alpha_l1_weight
-            total_loss = task_loss + self.lambda_weight * per_expert_concept_loss + alpha_reg
+            total_loss = task_loss + self.lambda_weight * concept_loss_for_backprop + alpha_reg
         else:
-            total_loss = task_loss + self.lambda_weight * per_expert_concept_loss
+            total_loss = task_loss + self.lambda_weight * concept_loss_for_backprop
 
         task_loss_percent = task_loss / total_loss * 100
 
