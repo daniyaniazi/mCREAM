@@ -123,7 +123,8 @@ def my_main(config_path: Path) -> None:
         / model_name
         / config_folder
     )
-    metrics_dir = default_root_dir / Path(config["paths"]["metric_dir"])
+    # Per-experiment metrics dir: <exp_name>/last_metrics/ so the notebook can find it
+    metrics_dir = default_root_dir / config_simple_name_version / Path(config["paths"]["metric_dir"])
 
     # Seed the randomness
     pl.seed_everything(seed, workers=True)
@@ -502,8 +503,17 @@ def my_main(config_path: Path) -> None:
                     default_root_dir / config_simple_name_version,
                 )
                 results.update({"intervention_results": intervention_results})
-            except:
-                pass
+                # Save as a separate CSV so the analysis notebook can find it via rglob
+                import csv as _csv, ast as _ast
+                _iv_path = Path(pl_checkpoint_path) / "intervention_results.csv"
+                _iv_rows = intervention_results if isinstance(intervention_results, list) else _ast.literal_eval(str(intervention_results))
+                if _iv_rows:
+                    _iv_flat = [{"group_interventions": r["group_interventions"], "num_interventions": r["metrics"]["num_interventions"], **{k: v for k, v in r["metrics"].items() if k != "num_interventions"}} for r in _iv_rows]
+                    with open(_iv_path, "w", newline="") as _f:
+                        _w = _csv.DictWriter(_f, fieldnames=_iv_flat[0].keys())
+                        _w.writeheader(); _w.writerows(_iv_flat)
+            except Exception as _e:
+                print(f"WARNING: interventions failed: {_e}")
 
         dict_to_csv(results, metrics_dir, config_path)
 
