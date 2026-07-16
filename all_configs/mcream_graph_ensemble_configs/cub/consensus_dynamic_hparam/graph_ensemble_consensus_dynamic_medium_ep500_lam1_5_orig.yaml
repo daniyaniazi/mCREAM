@@ -47,4 +47,4 @@ paths:
   default_root_dir: ./experiments/
   DAG_file: ./data/CUB/CUB_DAG_only_Gc.csv
   expert_graphs_dir: ./data/CUB/expert_graphs/consensus/medium/
-  input_model_path: ./pretrained_models/CUB/resnet18_cub.pth
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt

@@ -14,6 +14,7 @@ dataset_params:
   workers: 2
   return_labels: true
   return_images: true
+  class_name: unfair
 backbone_model: Standard_CelebA
 multi_expert:
   num_experts: 5
