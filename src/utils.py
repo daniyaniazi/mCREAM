@@ -12,6 +12,7 @@ from data.fashionmnist_loader import (
 )
 from data.celeba_loader import CelebADataModule
 from data.CUB_loader import CUBDataModule
+from data.AWA2_loader import AWA2DataModule
 from src.models import (
     FashionMNIST_for_CBM,
     Template_CBM_MultiClass,
@@ -179,6 +180,7 @@ def get_component_with_dicts(
         "Complete_Concept_FMNIST": ConceptFashionMNISTDataModule,
         "CelebA": CelebADataModule,
         "CUB": CUBDataModule,
+        "AWA2": AWA2DataModule,
     }
 
     if component_type == "model":
