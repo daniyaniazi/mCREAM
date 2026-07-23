@@ -8,7 +8,7 @@ __pycache__/
 
 server_scripts/data/
 experiments/
-data/
+data/FashionMNIST/
 
 pretrained_models/
 logs*/
