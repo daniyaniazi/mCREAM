@@ -59,7 +59,6 @@ class AWA2DataModule(pl.LightningDataModule):
         data_dir: str = "./data/AwA2",
         batch_size: int = 64,
         workers: int = 2,
-        seed: int = 44,
         return_concepts: bool = True,
         return_images: bool = True,
         **kwargs: Any,
@@ -68,7 +67,7 @@ class AWA2DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.workers = workers
-        self.seed = seed
+        self.split_seed = 44  # splits were generated with seed 44
         self.return_concepts = return_concepts
         self.return_images = return_images
 
@@ -101,7 +100,7 @@ class AWA2DataModule(pl.LightningDataModule):
             self.train_dataset = AWA2Dataset(
                 self.data_dir,
                 split="train",
-                seed=self.seed,
+                seed=self.split_seed,
                 transform=self.train_transform,
                 return_concepts=self.return_concepts,
                 return_images=self.return_images,
@@ -109,7 +108,7 @@ class AWA2DataModule(pl.LightningDataModule):
             self.val_dataset = AWA2Dataset(
                 self.data_dir,
                 split="val",
-                seed=self.seed,
+                seed=self.split_seed,
                 transform=self.test_transform,
                 return_concepts=self.return_concepts,
                 return_images=self.return_images,
@@ -119,7 +118,7 @@ class AWA2DataModule(pl.LightningDataModule):
             self.test_data = AWA2Dataset(
                 self.data_dir,
                 split="test",
-                seed=self.seed,
+                seed=self.split_seed,
                 transform=self.test_transform,
                 return_concepts=self.return_concepts,
                 return_images=self.return_images,
@@ -129,7 +128,7 @@ class AWA2DataModule(pl.LightningDataModule):
             self.predict_data = AWA2Dataset(
                 self.data_dir,
                 split="test",
-                seed=self.seed,
+                seed=self.split_seed,
                 transform=self.test_transform,
                 return_concepts=self.return_concepts,
                 return_images=self.return_images,
