@@ -1,5 +1,5 @@
 mode: train_x2y
-seed: [42,7,1,134,89]
+seed: 42
 dataset_name: AWA2
 dataset_params:
   batch_size: 64
