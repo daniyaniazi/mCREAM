@@ -596,8 +596,7 @@ class Standard_resnet18(Template_MultiClass):
         if self.frozen:
             return Adam(self.parameters(), lr=self.learning_rate)
         else:
-            assert self.dataset == "CUB"
-            print("LR scheduling for CUB")
+            print(f"LR scheduling for {self.dataset}")
             opt = Adam(self.parameters(), lr=self.learning_rate)
             scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=10, gamma=1 / 2)
             return [opt], [scheduler]

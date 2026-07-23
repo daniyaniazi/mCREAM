@@ -15,5 +15,6 @@ hyperparameters:
   num_classes: 50
   learning_rate: 0.0001
   frozen: false
+  dataset: AWA2
 trainer_param:
   max_epochs: 50
