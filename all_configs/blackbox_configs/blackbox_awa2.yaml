@@ -1,4 +1,4 @@
-mode: train_x2y
+mode: train_backbone
 seed: 42
 dataset_name: AWA2
 dataset_params:
@@ -7,7 +7,7 @@ dataset_params:
   return_concepts: false
   data_dir: /home/dani00003/GUIDE-cbm-WIP/data/AwA2
 
-model_name: Standard_CUB
+model_name: Standard_AWA2
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/

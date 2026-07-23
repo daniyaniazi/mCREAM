@@ -6,7 +6,7 @@ dataset_params:
   workers: 2
   return_concepts: true
   data_dir: /home/dani00003/GUIDE-cbm-WIP/data/AwA2
-model_name: Standard_CUB
+model_name: Standard_AWA2
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/

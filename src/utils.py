@@ -168,6 +168,7 @@ def get_component_with_dicts(
         "Standard_FashionMNIST": FashionMNIST_for_CBM,
         "Standard_CelebA": Standard_resnet18,
         "Standard_CUB": Standard_resnet18,
+        "Standard_AWA2": Standard_resnet18,
         "UtoY_model": UtoY_model,
         "CBM": Template_CBM_MultiClass,
         "c2y": C2Y_model,
