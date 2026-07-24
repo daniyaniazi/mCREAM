@@ -487,7 +487,7 @@ def my_main(config_path: Path) -> None:
                 results[concept_set + "_debugging_sage_metrics_side_channel"] = None
 
         ### interventions
-        if config["mode"] != "train_x2y":  # not blackbox
+        if config["mode"] not in ("train_x2y", "train_backbone"):  # not blackbox
             # Enable debug logging for intervention comparison
             import os as _os
             _debug_log = str(Path(pl_checkpoint_path) / "intervention_debug_cream.txt")
