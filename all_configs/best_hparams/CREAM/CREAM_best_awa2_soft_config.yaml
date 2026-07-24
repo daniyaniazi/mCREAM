@@ -12,7 +12,7 @@ paths:
   metric_dir: ./last_metrics/
   DAG_file: ./data/AwA2/adjacency_v1.csv
   softmax_mask: ./data/AwA2/AWA2_mutually_exclusive_concepts.json
-  input_model_path: ./pretrained_models/AWA2/version_0/checkpoints/best.ckpt
+  input_model_path: ./experiments/AWA2/train_backbone/Standard_AWA2/blackbox_configs/blackbox_awa2/lightning_logs/version_0/checkpoints/epoch=49-step=17500.ckpt
 hyperparameters_model2:
   num_classes: 50
   num_exogenous: 585
