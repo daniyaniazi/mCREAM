@@ -15,7 +15,7 @@ paths:
   input_model_path: ./experiments/AWA2/train_backbone/Standard_AWA2/blackbox_configs/blackbox_awa2/lightning_logs/version_0/checkpoints/epoch=49-step=17500.ckpt
 hyperparameters_model2:
   num_classes: 50
-  num_exogenous: 585
+  num_exogenous: 390
   num_side_channel: 50
   num_concepts: 85
   masking_algorithm: zuko
