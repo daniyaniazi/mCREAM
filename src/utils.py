@@ -19,6 +19,7 @@ from src.models import (
     C2Y_model,
     UtoY_model,
     Standard_resnet18,
+    Standard_resnet101,
 )
 from typing import Type
 
@@ -169,6 +170,7 @@ def get_component_with_dicts(
         "Standard_CelebA": Standard_resnet18,
         "Standard_CUB": Standard_resnet18,
         "Standard_AWA2": Standard_resnet18,
+        "Standard_AWA2_resnet101": Standard_resnet101,
         "UtoY_model": UtoY_model,
         "CBM": Template_CBM_MultiClass,
         "c2y": C2Y_model,

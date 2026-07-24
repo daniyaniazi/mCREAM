@@ -26,6 +26,6 @@ nvidia-smi || true
 
 echo ""
 echo "Running CREAM on AWA2..."
-"$PYTHON_BIN" simple_main.py --config all_configs/best_hparams/CREAM/CREAM_best_awa2_soft_config.yaml
+"$PYTHON_BIN" simple_main.py --config all_configs/best_hparams/CREAM/CREAM_best_awa2_resnet101_soft_config.yaml
 
 echo "Done!"

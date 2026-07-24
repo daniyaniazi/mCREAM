@@ -1,0 +1,32 @@
+mode: train_cbm
+seed: 42
+dataset_name: AWA2
+dataset_params:
+  batch_size: 64
+  workers: 2
+  return_concepts: true
+  data_dir: /home/dani00003/GUIDE-cbm-WIP/data/AwA2
+model_name: Standard_AWA2_resnet101
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/AwA2/adjacency_v1.csv
+  softmax_mask: ./data/AwA2/AWA2_mutually_exclusive_concepts.json
+hyperparameters_model2:
+  num_classes: 50
+  num_exogenous: 390
+  num_side_channel: 50
+  num_concepts: 85
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 2048
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 100

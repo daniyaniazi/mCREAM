@@ -602,6 +602,45 @@ class Standard_resnet18(Template_MultiClass):
             return [opt], [scheduler]
 
 
+class Standard_resnet101(Template_MultiClass):
+    def __init__(
+        self,
+        num_classes: int = 50,
+        learning_rate: float = 1e-3,
+        frozen: bool = True,
+        dataset: str = "AWA2",
+    ):
+        super().__init__(learning_rate, num_classes)
+        self.dataset = dataset
+        self.frozen = frozen
+
+        resnet = models.resnet101(weights=models.ResNet101_Weights.IMAGENET1K_V1)
+        self.concept_extractor = nn.Sequential(
+            *list(resnet.children())[:-1], nn.Flatten()
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(2048, num_classes),
+        )
+
+        if frozen:
+            freeze_model(self.concept_extractor)
+
+        self.save_hyperparameters()
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.concept_extractor(x)
+        return self.classifier(x)
+
+    def configure_optimizers(self) -> Optimizer | tuple[list[Optimizer], list[Any]]:
+        if self.frozen:
+            return Adam(self.parameters(), lr=self.learning_rate)
+        else:
+            print(f"LR scheduling for {self.dataset}")
+            opt = Adam(self.parameters(), lr=self.learning_rate)
+            scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=10, gamma=1 / 2)
+            return [opt], [scheduler]
+
+
 class FashionMNIST_for_CBM(Template_MultiClass):
     def __init__(
         self,
