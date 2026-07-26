@@ -6,12 +6,13 @@ dataset_params:
   workers: 2
   return_concepts: true
   data_dir: /home/dani00003/GUIDE-cbm-WIP/data/AwA2
-model_name: Standard_AWA2_resnet101
+model_name: Standard_AWA2
 paths:
   default_root_dir: ./experiments/
   metric_dir: ./last_metrics/
   DAG_file: ./data/AwA2/adjacency_v1.csv
   softmax_mask: ./data/AwA2/AWA2_mutually_exclusive_concepts.json
+  input_model_path: ./experiments/AWA2/train_backbone/Standard_AWA2/blackbox_configs/blackbox_awa2/lightning_logs/version_0/checkpoints/epoch=49-step=17500.ckpt
 hyperparameters_model2:
   num_classes: 50
   num_exogenous: 390
@@ -19,7 +20,7 @@ hyperparameters_model2:
   num_concepts: 85
   masking_algorithm: zuko
   num_hidden_layers_in_maskedmlp: 0
-  previous_model_output_size: 2048
+  previous_model_output_size: 512
   last_layer_mask: true
   concept_representation: group_soft
   side_dropout: true
