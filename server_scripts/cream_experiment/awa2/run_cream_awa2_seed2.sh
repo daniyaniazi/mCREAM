@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="/home/dani00003/mCREAM"
+CONDA_PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
+
+if [ -x "$CONDA_PYTHON" ]; then
+    PYTHON_BIN="$CONDA_PYTHON"
+else
+    echo "ERROR: Conda env not found at $CONDA_PYTHON" >&2
+    exit 127
+fi
+
+cd "$PROJECT_ROOT"
+echo "HOST=$(hostname)"
+"$PYTHON_BIN" -V
+nvidia-smi || true
+"$PYTHON_BIN" -c "import torch; print('torch=', torch.__version__, 'cuda=', torch.cuda.is_available())"
+"$PYTHON_BIN" -c "import pytorch_lightning, torchvision, yaml; print('deps_ok=1')"
+
+echo "Running CREAM on AWA2 seed=2..."
+"$PYTHON_BIN" simple_main.py --config all_configs/best_hparams/CREAM/CREAM_awa2_soft_seed2_config.yaml
+
+echo "Done!"

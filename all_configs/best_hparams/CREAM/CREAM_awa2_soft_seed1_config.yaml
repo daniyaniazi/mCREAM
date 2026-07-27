@@ -1,5 +1,5 @@
 mode: train_cbm
-seed: 42
+seed: 1
 dataset_name: AWA2
 dataset_params:
   batch_size: 64
