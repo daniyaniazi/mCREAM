@@ -1,5 +1,6 @@
 mode: train_cbm
 seed: 4
+experiment_name: CREAM_cub/seed_4
 dataset_name: CUB
 dataset_params:
   batch_size: 64

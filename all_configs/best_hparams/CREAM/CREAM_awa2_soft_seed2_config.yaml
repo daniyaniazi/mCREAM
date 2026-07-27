@@ -1,5 +1,6 @@
 mode: train_cbm
 seed: 2
+experiment_name: CREAM_awa2/seed_2
 dataset_name: AWA2
 dataset_params:
   batch_size: 64
