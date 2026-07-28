@@ -57,9 +57,6 @@ def main():
     ckpt_path = find_checkpoint(exp_dir)
     print(f"Loading checkpoint: {ckpt_path}")
 
-    model_class = get_component_with_dicts('model', model_name)
-
-    # load model2 params for UtoY
     from pandas import read_csv
     dag_path = config['paths']['DAG_file']
     df_dag   = read_csv(dag_path, index_col=0)
@@ -70,10 +67,38 @@ def main():
         with open(config['paths']['softmax_mask']) as f:
             softmax_mask = json.load(f)
 
+    # Build model1 and model2 — needed because load_from_checkpoint
+    # can't reconstruct them (saved with ignore=["model1","model2"])
+    model_class = get_component_with_dicts('model', model_name)
+    hyperparams_model2 = config['hyperparameters_model2']
+    hyperparams        = config['hyperparameters']
+
+    # model1 — backbone (weights will be overwritten by checkpoint)
+    model1 = model_class(
+        num_classes=hyperparams_model2['num_classes'],
+        learning_rate=hyperparams.get('learning_rate', 1e-4),
+        frozen=hyperparams.get('frozen_model1', True),
+    )
+
+    # model2 — UtoY
+    model2_kwargs = dict(**hyperparams_model2, causal_graph=causal_graph)
+    if softmax_mask is not None:
+        model2_kwargs['mutually_exclusive_concepts'] = softmax_mask
+    model2 = UtoY_model(**model2_kwargs)
+
+    # num_hyperparameters for Template_CBM_MultiClass
+    num_hparams = {k: hyperparams_model2[k] for k in
+                   ['num_classes', 'num_exogenous', 'num_side_channel',
+                    'num_concepts', 'concept_representation']}
+
     model = Template_CBM_MultiClass.load_from_checkpoint(
         ckpt_path,
         map_location=device,
-        strict=False,
+        strict=True,
+        model1=model1,
+        model2=model2,
+        **num_hparams,
+        **hyperparams,
     )
     model.eval().to(device)
 
