@@ -178,6 +178,25 @@ def compute_nec_anec(
 # ADI  (Average Drop / Increase / Gain)
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _compute_class_cam(feat_map: Tensor, cam_weights: Tensor, last_layer_weight: Tensor, y_idx: int) -> Tensor:
+    """
+    Class-level CAM: weighted sum of concept CAMs by last_layer weights for class y_idx.
+    last_layer_weight: (num_classes, num_concepts)  — only concept part (no side channel)
+    Returns: (B, H, W)
+    """
+    class_weights = last_layer_weight[y_idx]                        # (K,)
+    class_weights = F.relu(class_weights)                           # keep positive contributions
+    class_weights = class_weights / (class_weights.sum() + 1e-8)    # normalize
+    # concept cams: (B, K, H, W)
+    cams = _compute_concept_cams(feat_map, cam_weights)
+    # weighted sum over concepts
+    class_cam = (cams * class_weights[None, :, None, None]).sum(dim=1)  # (B, H, W)
+    # normalize to [0,1]
+    cam_min = class_cam.flatten(1).min(dim=1).values[:, None, None]
+    cam_max = class_cam.flatten(1).max(dim=1).values[:, None, None]
+    return (class_cam - cam_min) / (cam_max - cam_min + 1e-8)
+
+
 @torch.no_grad()
 def compute_adi(
     model,
@@ -186,10 +205,8 @@ def compute_adi(
     img_size: int = 224,
 ) -> Dict:
     """
-    For each active concept in each sample:
-      1. Compute CAM for that concept
-      2. Mask image with CAM
-      3. Compare concept score before/after masking
+    Sc — concept-level ADI: mask with per-concept CAM, measure concept score change
+    Sy — class-level ADI:   mask with class CAM, measure class score change
 
     AD  (Average Drop)     ↓  lower is better
     AI  (Average Increase) ↓  lower is better
@@ -198,64 +215,83 @@ def compute_adi(
     model.eval()
     model.to(device)
 
-    cam_weights = _get_concept_cam_weights(model).to(device)  # (K, C)
+    cam_weights = _get_concept_cam_weights(model).to(device)  # (K, backbone_dim)
 
-    drops, increases, gains = [], [], []
-    total_active = 0
+    # last_layer weight for class CAM — shape (num_classes, num_concepts+num_side)
+    # grab only the concept columns
+    num_concepts = model.u_to_CY.num_concepts
+    last_layer_w = model.u_to_CY.last_layer.weight.detach().to(device)  # (C, K+side)
+    last_layer_w_concepts = last_layer_w[:, :num_concepts]               # (C, K)
+
+    sc_drops, sc_incs, sc_gains = [], [], []
+    sy_drops, sy_incs, sy_gains = [], [], []
 
     for batch in dataloader:
         x, c_true, y_true = batch
-        x, c_true = x.to(device), c_true.to(device)
+        x, c_true, y_true = x.to(device), c_true.to(device), y_true.to(device)
 
-        # ── forward with layer4 hook ──────────────────────────────────────
         handle, storage = _hook_layer4(model)
-        _, c_pred = model(x)
+        y_logits, c_pred = model(x)
         handle.remove()
 
-        feat_map = storage['feat']                         # (B, C, H, W)
-        cams = _compute_concept_cams(feat_map, cam_weights)  # (B, K, 7, 7)
+        feat_map = storage['feat']                                        # (B, backbone_dim, H, W)
+        cams     = _compute_concept_cams(feat_map, cam_weights)           # (B, K, 7, 7)
+        cams_up  = F.interpolate(cams, size=(img_size, img_size),
+                                 mode='bilinear', align_corners=False)    # (B, K, 224, 224)
 
-        B, K, H, W = cams.shape
+        c_scores_orig = torch.sigmoid(c_pred)                             # (B, K)
+        y_scores_orig = torch.softmax(y_logits, dim=1)                    # (B, num_classes)
+        y_pred        = y_logits.argmax(dim=1)                            # (B,)
 
-        # upsample CAM to image size
-        cams_up = F.interpolate(cams, size=(img_size, img_size),
-                                mode='bilinear', align_corners=False)  # (B, K, 224, 224)
+        for b in range(x.shape[0]):
+            active_concepts = c_true[b].nonzero(as_tuple=True)[0].tolist()
+            if not active_concepts:
+                continue
 
-        # original concept scores (sigmoid)
-        c_scores_orig = torch.sigmoid(c_pred)   # (B, K)
-
-        for b in range(B):
-            active_concepts = c_true[b].nonzero(as_tuple=True)[0]
+            # ── Sc: per-concept ────────────────────────────────────────────
             for ci in active_concepts:
-                ci = ci.item()
-                mask = cams_up[b, ci]          # (224, 224) in [0,1]
-                # mask image: keep only salient region
-                masked_img = x[b:b+1] * mask[None, None, :, :]  # (1, 3, 224, 224)
+                concept_mask = cams_up[b, ci, None, None, :]              # (1, 1, 224, 224)
+                masked_img   = x[b:b+1] * concept_mask
+                _, c_masked  = model(masked_img)
+                c_s_masked   = torch.sigmoid(c_masked)
 
-                # forward masked image
-                handle2, storage2 = _hook_layer4(model)
-                _, c_pred_masked = model(masked_img)
-                handle2.remove()
+                s0 = c_scores_orig[b, ci].item()
+                sm = c_s_masked[0, ci].item()
 
-                c_scores_masked = torch.sigmoid(c_pred_masked)  # (1, K)
+                sc_drops.append(max(0.0, (s0 - sm) / (s0 + 1e-8)))
+                sc_incs.append(float(sm > s0))
+                sc_gains.append(max(0.0, sm - s0))
 
-                s_orig   = c_scores_orig[b, ci].item()
-                s_masked = c_scores_masked[0, ci].item()
+            # ── Sy: class-level ────────────────────────────────────────────
+            yi = y_pred[b].item()
+            class_cam_b = _compute_class_cam(
+                feat_map[b:b+1], cam_weights, last_layer_w_concepts, yi
+            )   # (1, 7, 7)
+            class_cam_up = F.interpolate(
+                class_cam_b.unsqueeze(0), size=(img_size, img_size),
+                mode='bilinear', align_corners=False
+            )[0, 0]                                                        # (224, 224)
 
-                drop = max(0.0, (s_orig - s_masked) / (s_orig + 1e-8))
-                inc  = float(s_masked > s_orig)
-                gain = max(0.0, s_masked - s_orig)
+            masked_img_y  = x[b:b+1] * class_cam_up[None, None, :, :]
+            y_logits_m, _ = model(masked_img_y)
+            y_s_masked     = torch.softmax(y_logits_m, dim=1)
 
-                drops.append(drop)
-                increases.append(inc)
-                gains.append(gain)
-                total_active += 1
+            s0y = y_scores_orig[b, yi].item()
+            smy = y_s_masked[0, yi].item()
+
+            sy_drops.append(max(0.0, (s0y - smy) / (s0y + 1e-8)))
+            sy_incs.append(float(smy > s0y))
+            sy_gains.append(max(0.0, smy - s0y))
 
     return {
-        'AD':  round(float(np.mean(drops)),     4),
-        'AI':  round(float(np.mean(increases)), 4),
-        'AG':  round(float(np.mean(gains)),     4),
-        'n_active_concepts': total_active,
+        'Sc_AD': round(float(np.mean(sc_drops)), 4),
+        'Sc_AI': round(float(np.mean(sc_incs)),  4),
+        'Sc_AG': round(float(np.mean(sc_gains)), 4),
+        'Sy_AD': round(float(np.mean(sy_drops)), 4),
+        'Sy_AI': round(float(np.mean(sy_incs)),  4),
+        'Sy_AG': round(float(np.mean(sy_gains)), 4),
+        'n_concept_samples': len(sc_drops),
+        'n_class_samples':   len(sy_drops),
     }
 
 
