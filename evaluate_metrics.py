@@ -91,11 +91,13 @@ def main():
                    ['num_classes', 'num_exogenous', 'num_side_channel',
                     'num_concepts', 'concept_representation']}
 
+    # Template_CBM_MultiClass is constructed with model1.concept_extractor,
+    # not the full model1 — see simple_main.py line 268
     model = Template_CBM_MultiClass.load_from_checkpoint(
         ckpt_path,
         map_location=device,
         strict=True,
-        model1=model1,
+        model1=model1.concept_extractor,
         model2=model2,
         **num_hparams,
         **hyperparams,

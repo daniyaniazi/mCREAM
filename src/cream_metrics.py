@@ -26,7 +26,7 @@ def _get_concept_cam_weights(model) -> Tensor:
     Compute combined projection weights: u2c @ u2u  →  (num_concepts, backbone_dim)
     Works when u2c_model has 0 hidden layers (MaskedLinear / single Linear).
     """
-    u2u_w = model.u_to_CY.u2u_model[0].weight.detach()   # (num_exogenous, backbone_dim)
+    u2u_w = model.u_to_CY.u2u_model[0].weight.detach()   # (num_exogenous, backbone_dim=512/2048)
     # u2c_model is a MaskedMLP / MaskedLinear — grab the first (and only) linear weight
     u2c_layer = model.u_to_CY.u2c_model
     # Walk through Sequential / MaskedMLP to find first weight matrix
@@ -46,11 +46,17 @@ def _get_concept_cam_weights(model) -> Tensor:
 
 
 def _hook_layer4(model):
-    """Register forward hook on layer4, return (handle, storage_dict)."""
+    """Register forward hook on layer4, return (handle, storage_dict).
+
+    x_to_u is concept_extractor = nn.Sequential(conv1, bn1, relu, maxpool,
+    layer1, layer2, layer3, layer4, avgpool, flatten)
+    layer4 is at index 7.
+    """
     storage = {}
     def hook(module, inp, out):
         storage['feat'] = out  # (B, C, H, W)
-    handle = model.x_to_u.resnet.layer4.register_forward_hook(hook)
+    layer4 = model.x_to_u[7]  # layer4 in the Sequential
+    handle = layer4.register_forward_hook(hook)
     return handle, storage
 
 
