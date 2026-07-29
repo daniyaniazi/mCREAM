@@ -394,6 +394,7 @@ def evaluate_all(
     if run_adi:
         print("Computing ADI (may take a while)...")
         adi_results = compute_adi(model, loader, device)
-        print(f"  AD={adi_results['AD']}  AI={adi_results['AI']}  AG={adi_results['AG']}")
+        print(f"  Sc: AD={adi_results['Sc_AD']} AI={adi_results['Sc_AI']} AG={adi_results['Sc_AG']}")
+        print(f"  Sy: AD={adi_results['Sy_AD']} AI={adi_results['Sy_AI']} AG={adi_results['Sy_AG']}")
 
     return {**nec_results, **adi_results}
