@@ -31,7 +31,7 @@ hyperparameters_model2:
   num_concepts: 7
   num_exogenous: 75
   num_side_channel: 5
-  concept_representation: group_soft
+  concept_representation: soft
   num_hidden_layers_in_maskedmlp: 0
   previous_model_output_size: 512
   side_dropout: true
