@@ -28,8 +28,8 @@ dynamic_graphs:
 hyperparameters_model2:
   num_classes: 200
   num_concepts: 112
-  num_exogenous: 512
-  num_side_channel: 50
+  num_exogenous: 648
+  num_side_channel: 200
   concept_representation: group_soft
   num_hidden_layers_in_maskedmlp: 0
   previous_model_output_size: 512
