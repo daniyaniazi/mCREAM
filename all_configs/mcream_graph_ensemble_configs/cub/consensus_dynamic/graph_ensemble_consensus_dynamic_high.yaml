@@ -42,3 +42,4 @@ paths:
   expert_graphs_dir: ./data/CUB/expert_graphs/consensus/high/
   input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
   softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
+uniform_lambda: false

@@ -49,3 +49,4 @@ paths:
   expert_graphs_dir: ./data/FashionMNIST/expert_graphs/consensus/medium/
   input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
   softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
+uniform_lambda: false

@@ -268,6 +268,12 @@ def run_single_seed(config, config_path, seed):
         loss_type=config.get("loss_type", "per_expert"),
     )
 
+    # ── Uniform lambda: freeze _lambda_logits at uniform 1/M ─────────────────
+    if config.get("uniform_lambda", False):
+        torch.nn.init.zeros_(model.u_to_CY._lambda_logits)
+        model.u_to_CY._lambda_logits.requires_grad_(False)
+        print(f"Uniform mCREAM: λ fixed to 1/{model.u_to_CY.num_experts} = {1/model.u_to_CY.num_experts:.4f}")
+
     experiment_name = config.get("experiment_name", config_path.stem)
     default_root_dir = (
         Path(config["paths"]["default_root_dir"])
@@ -565,6 +571,17 @@ def run_single_seed(config, config_path, seed):
         results["alpha_mean"]    = float(alpha_np.mean())
         results["alpha_max"]     = float(alpha_np.max())
         results["alpha_sparsity"] = float((alpha_np < 0.1).mean())  # fraction near-zero
+
+    # ── Save learned λ_m weights ─────────────────────────────────────────────
+    lambda_weights = model.u_to_CY.expert_weights.detach().cpu().numpy()  # [M]
+    lambda_path = pl_checkpoint_path / f"lambda_weights_seed{seed}.csv"
+    pd.DataFrame(
+        lambda_weights.reshape(1, -1),
+        columns=[f"expert_{m}" for m in range(len(lambda_weights))],
+    ).to_csv(lambda_path, index=False, float_format="%.6f")
+    print(f"Lambda weights saved: {lambda_path}  values={lambda_weights.round(4).tolist()}")
+    for m, lw in enumerate(lambda_weights):
+        results[f"lambda_expert_{m}"] = float(lw)
 
     return results
 

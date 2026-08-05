@@ -33,6 +33,7 @@ DATASET="cfmnist"
 LEVELS=""          # empty = all
 DYNAMIC=false
 HPARAM=false
+UNIFORM_LAMBDA=false
 FILTER_EPOCHS=""   # empty = all
 FILTER_LOSS=""     # empty = all
 
@@ -63,6 +64,7 @@ while [[ $# -gt 0 ]]; do
             done
             FILTER_LOSS="${FILTER_LOSS# }"
             ;;
+        --uniform-lambda) UNIFORM_LAMBDA=true; shift ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -125,11 +127,24 @@ submit_dir() {
             [ "$MATCH" = false ] && continue
         fi
 
+        # For uniform lambda: patch config on the fly — flip flag and prefix experiment_name
+        SUBMIT_CONFIG="$CONFIG"
+        if [ "$UNIFORM_LAMBDA" = true ]; then
+            UNIFORM_BASE="uniform_lambda_${BASE}"
+            TMP_CONFIG="/tmp/${UNIFORM_BASE}.yaml"
+            sed \
+                -e "s/uniform_lambda: false/uniform_lambda: true/" \
+                -e "s/experiment_name: ${BASE}/experiment_name: uniform_lambda_${BASE}/" \
+                "$CONFIG" > "$TMP_CONFIG"
+            SUBMIT_CONFIG="$TMP_CONFIG"
+            BASE="$UNIFORM_BASE"
+        fi
+
         echo "  → $BASE"
         echo "universe                = docker
 docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 executable              = $PYTHON
-arguments               = mcream_graph_ensemble_main.py --config ${CONFIG}
+arguments               = mcream_graph_ensemble_main.py --config ${SUBMIT_CONFIG}
 initialdir              = /home/dani00003/mCREAM
 
 output                  = /home/dani00003/mCREAM/logs/${BASE}.\$(ClusterId).\$(ProcId).out
@@ -149,6 +164,7 @@ queue 1" | condor_submit
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
+# --uniform-lambda reuses consensus_0.9 configs but patches them on the fly
 for DS in $DATASETS; do
     if [ "$HPARAM" = true ]; then
         submit_dir "all_configs/mcream_graph_ensemble_configs/${DS}/consensus_dynamic_hparam"
