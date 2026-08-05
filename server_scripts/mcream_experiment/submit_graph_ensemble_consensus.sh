@@ -131,7 +131,7 @@ submit_dir() {
         SUBMIT_CONFIG="$CONFIG"
         if [ "$UNIFORM_LAMBDA" = true ]; then
             UNIFORM_BASE="uniform_lambda_${BASE}"
-            TMP_CONFIG="/tmp/${UNIFORM_BASE}.yaml"
+            TMP_CONFIG="$(dirname "$CONFIG")/${UNIFORM_BASE}.yaml"
             sed \
                 -e "s/uniform_lambda: false/uniform_lambda: true/" \
                 -e "s/experiment_name: ${BASE}/experiment_name: uniform_lambda_${BASE}/" \
