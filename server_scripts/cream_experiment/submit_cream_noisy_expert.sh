@@ -5,7 +5,7 @@
 # USAGE:
 #   ./submit_cream_noisy_expert.sh                        # cub, all levels, all experts
 #   ./submit_cream_noisy_expert.sh --dataset celeba       # celeba
-#   ./submit_cream_noisy_expert.sh --dataset all          # cub + celeba
+#   ./submit_cream_noisy_expert.sh --dataset all          # cub + celeba + cfmnist
 #   ./submit_cream_noisy_expert.sh --level low            # low noise only
 #   ./submit_cream_noisy_expert.sh --dataset cub --level high
 
@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$DATASET" = "all" ]; then
-    DATASETS="cub celeba"
+    DATASETS="cub celeba cfmnist"
 else
     DATASETS="$DATASET"
 fi

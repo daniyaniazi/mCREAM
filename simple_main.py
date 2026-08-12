@@ -402,9 +402,7 @@ def my_main(config_path: Path) -> None:
             results["PFI_side_importance"] = PFI_side_importance
 
             print("\nStarting SAGE calculation\n")
-            from src.utils import timeout
 
-            @timeout(3600)
             def run_sage(concept_set, train_latent, test_latent, config, results):
                 if concept_set == "true_concepts":
                     sage_df_train = train_latent[1]
