@@ -37,7 +37,10 @@ def interventions(model, dataset, config, pl_results_dir):
         max_epochs=max_epochs,
         default_root_dir=pl_results_dir,
         enable_progress_bar=False,
-        deterministic=True,
+        # Intervention evaluation can hit CUDA ops that do not have deterministic
+        # kernels on CelebA. Keep training seeded, but do not let this post-hoc
+        # evaluation crash before intervention_results.csv is written.
+        deterministic=False,
         logger=False,
     )
     all_results = []  # collect everything here for one run

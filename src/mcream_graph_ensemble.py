@@ -98,7 +98,17 @@ class UtoY_MultiGraph(UtoY_model):
             # sigmoid(alpha_logits[i,j]) ∈ (0,1) = importance of edge i→j
             # Init positive (sigmoid(1.0)=0.73): assume edges matter, let L1 prune.
             # Zero init (0.5) lets L1 win too early before concept loss builds signal.
-            self._alpha_logits = nn.Parameter(torch.ones(num_concepts, num_concepts))
+            # Previous full-matrix version, kept for reference:
+            # self._alpha_logits = nn.Parameter(torch.ones(num_concepts, num_concepts))
+            #
+            # New version: only off-diagonal logits are learnable. The diagonal is
+            # reconstructed as a fixed probability of 1.0 in alpha_prob().
+            offdiag_mask = ~torch.eye(num_concepts, dtype=torch.bool)
+            self.register_buffer("_alpha_offdiag_mask", offdiag_mask)
+            self._alpha_diag_prob = 1.0
+            self._alpha_offdiag_logits = nn.Parameter(
+                torch.ones(num_concepts * (num_concepts - 1))
+            )
 
             # SoftMaskedLinear uses alpha to gate each expert's binary mask softly
             self.u2c_models = nn.ModuleList([
@@ -106,7 +116,11 @@ class UtoY_MultiGraph(UtoY_model):
                     K=num_concepts,
                     D=input_per_concept,
                     binary_graph=g[:-num_classes, :-num_classes],
-                    alpha_logits=self._alpha_logits,   # shared reference across all M
+                    # Previous full-matrix argument:
+                    # alpha_logits=self._alpha_logits,
+                    alpha_offdiag_logits=self._alpha_offdiag_logits,
+                    alpha_offdiag_mask=self._alpha_offdiag_mask,
+                    alpha_diag_prob=self._alpha_diag_prob,
                 )
                 for g in expert_graphs
             ])
@@ -129,11 +143,25 @@ class UtoY_MultiGraph(UtoY_model):
         """Edge importance probabilities [K, K] in (0,1). Only valid when use_alpha=True."""
         if not self.use_alpha:
             raise AttributeError("alpha_prob only available when use_alpha=True")
-        return torch.sigmoid(self._alpha_logits)
+        # Previous full-matrix version:
+        # return torch.sigmoid(self._alpha_logits)
+        #
+        # New version returns a full [K, K] matrix too, but only off-diagonal
+        # entries come from learnable logits. Diagonal entries are fixed at 1.0.
+        K = self.num_concepts
+        alpha = torch.eye(
+            K,
+            device=self._alpha_offdiag_logits.device,
+            dtype=self._alpha_offdiag_logits.dtype,
+        ) * self._alpha_diag_prob
+        alpha[self._alpha_offdiag_mask] = torch.sigmoid(self._alpha_offdiag_logits)
+        return alpha
 
     def alpha_l1_loss(self) -> Tensor:
         """L1 sparsity penalty on alpha. Only valid when use_alpha=True."""
-        return self.alpha_prob.sum()
+        # Previous full-matrix version also penalized the trainable diagonal:
+        # return self.alpha_prob.sum()
+        return torch.sigmoid(self._alpha_offdiag_logits).sum()
 
     def _build_u2c_from_graph(
         self,
@@ -562,12 +590,20 @@ class SoftMaskedLinear(nn.Module):
         K: int,                         # num_concepts
         D: int,                         # input_per_concept (num_exogenous - num_side) // K
         binary_graph: BoolTensor,       # [K, K] expert binary u2c graph
-        alpha_logits: nn.Parameter,     # [K, K] shared, owned externally
+        # Previous full-matrix argument:
+        # alpha_logits: nn.Parameter,     # [K, K] shared, owned externally
+        alpha_offdiag_logits: nn.Parameter,
+        alpha_offdiag_mask: BoolTensor,
+        alpha_diag_prob: float = 1.0,
     ):
         super().__init__()
         self.K = K
         self.D = D
-        self.alpha_logits_ref = alpha_logits   # shared reference — NOT owned here
+        # Previous full-matrix reference:
+        # self.alpha_logits_ref = alpha_logits
+        self.alpha_offdiag_logits_ref = alpha_offdiag_logits
+        self.alpha_diag_prob = alpha_diag_prob
+        self.register_buffer("alpha_offdiag_mask", alpha_offdiag_mask.clone())
 
         # Learnable weights — init larger than default 0.01 so alpha gets
         # meaningful gradient signal from concept loss before L1 suppresses it
@@ -602,7 +638,16 @@ class SoftMaskedLinear(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         # x: [B, K*D]  where x[:, i*D:(i+1)*D] = u-dims of concept i
-        alpha_prob = torch.sigmoid(self.alpha_logits_ref)          # [K, K] alpha[i,j]=importance of i→j
+        # Previous full-matrix version:
+        # alpha_prob = torch.sigmoid(self.alpha_logits_ref)
+        alpha_prob = torch.eye(
+            self.K,
+            device=self.alpha_offdiag_logits_ref.device,
+            dtype=self.alpha_offdiag_logits_ref.dtype,
+        ) * self.alpha_diag_prob
+        alpha_prob[self.alpha_offdiag_mask] = torch.sigmoid(
+            self.alpha_offdiag_logits_ref
+        )
 
         # Expand alpha to weight matrix shape [K_out, K_in*D]
         # alpha_exp[j, i*D:(i+1)*D] = alpha[i,j]  (importance of edge i→j)
