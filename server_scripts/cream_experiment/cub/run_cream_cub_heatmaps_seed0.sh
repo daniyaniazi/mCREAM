@@ -22,7 +22,7 @@ nvidia-smi || true
 echo "Generating CREAM CUB seed=0 heatmaps for 5 test samples..."
 "$PYTHON_BIN" evaluate_metrics.py \
     --config "$CONFIG_PATH" \
-    --heatmap_images 5 \
+    --heatmap_images 20 \
     --only_heatmaps
 
 echo "Done!"
