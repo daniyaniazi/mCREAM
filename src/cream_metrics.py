@@ -308,10 +308,11 @@ def save_concept_saliency_maps(
     save_dir: str,
     n_images: int = 10,
     img_size: int = 224,
+    save_pt: bool = True,
 ):
     """
     For the first n_images test samples, save per-concept CAM overlays as PNGs.
-    Output: save_dir/sample_{i}/concept_{name}.png
+    Output: save_dir/sample_{i}/concept_{name}.png and sample_{i}_heatmaps.pt.
     """
     import os
     import matplotlib.pyplot as plt
@@ -362,9 +363,26 @@ def save_concept_saliency_maps(
                 title = f'{name} ({"active" if active else "inactive"})'
                 axes[1].set_title(title); axes[1].axis('off')
                 plt.tight_layout()
-                fname = os.path.join(sample_dir, f'concept_{ci:03d}_{name}.png')
+                safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in name)
+                fname = os.path.join(sample_dir, f'concept_{ci:03d}_{safe_name}.png')
                 plt.savefig(fname, dpi=80, bbox_inches='tight')
                 plt.close()
+
+            if save_pt:
+                pt_path = os.path.join(sample_dir, f'sample_{saved}_heatmaps.pt')
+                torch.save(
+                    {
+                        'sample_index': saved,
+                        'image_normalized': x[b].detach().cpu(),
+                        'image_display': torch.from_numpy(img).permute(2, 0, 1),
+                        'true_concepts': c_true[b].detach().cpu(),
+                        'active_concept_indices': active_concepts,
+                        'concept_names': concept_names,
+                        'cams_layer4': cams[b].detach().cpu(),
+                        'cams_up': cams_up[b].detach().cpu(),
+                    },
+                    pt_path,
+                )
 
             saved += 1
 

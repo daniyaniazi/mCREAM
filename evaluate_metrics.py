@@ -13,7 +13,7 @@ from pathlib import Path
 import pytorch_lightning as pl
 from src.utils import get_component_with_dicts, load_config
 from src.models import Template_CBM_MultiClass, UtoY_model
-from src.cream_metrics import evaluate_all
+from src.cream_metrics import evaluate_all, save_concept_saliency_maps
 from src.saving_intermediate_utils import save_activation_percentiles
 
 
@@ -26,10 +26,31 @@ def find_checkpoint(exp_dir: Path) -> Path:
     return best[0] if best else ckpts[-1]
 
 
+def get_concept_names(datamodule, dag_path: str, num_concepts: int, num_classes: int) -> list[str]:
+    if hasattr(datamodule, 'concept_names'):
+        names = list(datamodule.concept_names)
+        if len(names) == num_concepts:
+            return names
+
+    try:
+        import pandas as pd
+        dag_names = list(pd.read_csv(dag_path, index_col=0).index)
+        names = dag_names[:-num_classes] if num_classes > 0 else dag_names
+        if len(names) == num_concepts:
+            return names
+    except Exception:
+        pass
+
+    return [f'concept_{i}' for i in range(num_concepts)]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
     parser.add_argument('--no_adi', action='store_true', help='Skip ADI (faster)')
+    parser.add_argument('--no_heatmaps', action='store_true', help='Skip CAM heatmap PNG/PT export')
+    parser.add_argument('--heatmap_images', type=int, default=10, help='Number of test samples to export CAM heatmaps for')
+    parser.add_argument('--only_heatmaps', action='store_true', help='Export CAM heatmaps and skip NEC/ANEC/ADI')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
 
@@ -108,6 +129,33 @@ def main():
     pl.seed_everything(seed)
     dataset_class = get_component_with_dicts('dataset', dataset_name)
     datamodule = dataset_class(**config['dataset_params'])
+    datamodule.setup(stage='test')
+
+    out_dir = exp_dir / 'last_metrics'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not args.no_heatmaps:
+        concept_names = get_concept_names(
+            datamodule=datamodule,
+            dag_path=dag_path,
+            num_concepts=hyperparams_model2['num_concepts'],
+            num_classes=hyperparams_model2['num_classes'],
+        )
+        heatmap_dir = out_dir / 'heatmaps'
+        print(f"Saving CAM heatmap PNG/PT files to {heatmap_dir}...")
+        save_concept_saliency_maps(
+            model=model,
+            dataloader=datamodule.test_dataloader(),
+            device=device,
+            concept_names=concept_names,
+            save_dir=str(heatmap_dir),
+            n_images=args.heatmap_images,
+            save_pt=True,
+        )
+
+        if args.only_heatmaps:
+            print("Heatmap export complete; skipping NEC/ANEC/ADI.")
+            return
 
     # ── Compute activation percentiles for NEC ────────────────────────────
     print("Computing activation percentiles for NEC intervention mapping...")
@@ -133,8 +181,6 @@ def main():
     results['dataset'] = dataset_name
 
     # ── Save results ───────────────────────────────────────────────────────
-    out_dir = exp_dir / 'last_metrics'
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / 'nec_anec_adi.json'
     with open(out_path, 'w') as f:
         json.dump(results, f, indent=2)
