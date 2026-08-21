@@ -74,7 +74,7 @@ class AWA2DataModule(pl.LightningDataModule):
         self.train_transform = transforms.Compose(
             [
                 transforms.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
-                transforms.RandomResizedCrop(299),
+                # transforms.RandomResizedCrop(299),
                 transforms.Resize((224, 224)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
@@ -86,7 +86,7 @@ class AWA2DataModule(pl.LightningDataModule):
 
         self.test_transform = transforms.Compose(
             [
-                transforms.CenterCrop(299),
+                # transforms.CenterCrop(299),
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize(
