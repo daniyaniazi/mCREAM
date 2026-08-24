@@ -1,7 +1,11 @@
 import argparse
+import sys
 from pathlib import Path
 
 import pytorch_lightning as pl
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils import get_component_with_dicts, load_config
 
