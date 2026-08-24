@@ -44,12 +44,62 @@ def get_concept_names(datamodule, dag_path: str, num_concepts: int, num_classes:
     return [f'concept_{i}' for i in range(num_concepts)]
 
 
+def parse_heatmap_indices(indices: str | None) -> list[int] | None:
+    if not indices:
+        return None
+    return [int(idx.strip()) for idx in indices.split(',') if idx.strip()]
+
+
+def read_heatmap_ids(ids_path: str | None) -> list[str] | None:
+    if not ids_path:
+        return None
+    with open(ids_path) as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def find_test_indices_by_image_ids(datamodule, image_ids: list[str]) -> list[int]:
+    test_dataset = getattr(datamodule, 'test_data', None)
+    if test_dataset is None or not hasattr(test_dataset, 'data'):
+        raise RuntimeError("Could not inspect datamodule.test_data.data for image-id matching.")
+
+    from pathlib import Path
+
+    samples = test_dataset.data
+    matched_indices = []
+    missing_ids = []
+
+    for image_id in image_ids:
+        match_idx = None
+        for idx, item in enumerate(samples):
+            img_path = str(item.get('img_path', ''))
+            stem = Path(img_path).stem
+            name = Path(img_path).name
+            if image_id == stem or image_id == name or image_id in img_path:
+                match_idx = idx
+                break
+
+        if match_idx is None:
+            missing_ids.append(image_id)
+        else:
+            matched_indices.append(match_idx)
+
+    if missing_ids:
+        print("WARNING: Could not find these requested image IDs in the test split:")
+        for image_id in missing_ids:
+            print(f"  {image_id}")
+
+    print(f"Matched {len(matched_indices)}/{len(image_ids)} requested image IDs.")
+    return matched_indices
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
     parser.add_argument('--no_adi', action='store_true', help='Skip ADI (faster)')
     parser.add_argument('--no_heatmaps', action='store_true', help='Skip CAM heatmap PNG/PT export')
     parser.add_argument('--heatmap_images', type=int, default=10, help='Number of test samples to export CAM heatmaps for')
+    parser.add_argument('--heatmap_indices', default=None, help='Comma-separated test-set indices to export, e.g. 12,45,88')
+    parser.add_argument('--heatmap_ids', default=None, help='Text file with one image ID/path fragment per line')
     parser.add_argument('--only_heatmaps', action='store_true', help='Export CAM heatmaps and skip NEC/ANEC/ADI')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
@@ -135,6 +185,10 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not args.no_heatmaps:
+        heatmap_indices = parse_heatmap_indices(args.heatmap_indices)
+        heatmap_ids = read_heatmap_ids(args.heatmap_ids)
+        if heatmap_ids is not None:
+            heatmap_indices = find_test_indices_by_image_ids(datamodule, heatmap_ids)
         concept_names = get_concept_names(
             datamodule=datamodule,
             dag_path=dag_path,
@@ -151,6 +205,7 @@ def main():
             save_dir=str(heatmap_dir),
             n_images=args.heatmap_images,
             save_pt=True,
+            sample_indices=heatmap_indices,
         )
 
         if args.only_heatmaps:

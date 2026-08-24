@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from torch import Tensor
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import pytorch_lightning as pl
 
 
@@ -309,9 +309,11 @@ def save_concept_saliency_maps(
     n_images: int = 10,
     img_size: int = 224,
     save_pt: bool = True,
+    sample_indices: Optional[List[int]] = None,
 ):
     """
-    For the first n_images test samples, save per-concept CAM overlays as PNGs.
+    Save per-concept CAM overlays as PNGs for the first n_images test samples,
+    or for explicit test-set sample_indices when provided.
     Output: save_dir/sample_{i}/concept_{name}.png and sample_{i}_heatmaps.pt.
     """
     import os
@@ -324,8 +326,10 @@ def save_concept_saliency_maps(
     IMAGENET_STD  = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
 
     saved = 0
+    seen = 0
+    selected_indices = set(sample_indices) if sample_indices is not None else None
     for batch in dataloader:
-        if saved >= n_images:
+        if selected_indices is None and saved >= n_images:
             break
         x, c_true, _ = batch
         x = x.to(device)
@@ -340,9 +344,13 @@ def save_concept_saliency_maps(
                                 mode='bilinear', align_corners=False) # (B, K, 224, 224)
 
         for b in range(x.shape[0]):
-            if saved >= n_images:
+            sample_idx = seen + b
+            if selected_indices is None and saved >= n_images:
                 break
-            sample_dir = os.path.join(save_dir, f'sample_{saved}')
+            if selected_indices is not None and sample_idx not in selected_indices:
+                continue
+
+            sample_dir = os.path.join(save_dir, f'sample_{sample_idx}')
             os.makedirs(sample_dir, exist_ok=True)
 
             # denormalize image for display
@@ -369,10 +377,10 @@ def save_concept_saliency_maps(
                 plt.close()
 
             if save_pt:
-                pt_path = os.path.join(sample_dir, f'sample_{saved}_heatmaps.pt')
+                pt_path = os.path.join(sample_dir, f'sample_{sample_idx}_heatmaps.pt')
                 torch.save(
                     {
-                        'sample_index': saved,
+                        'sample_index': sample_idx,
                         'image_normalized': x[b].detach().cpu(),
                         'image_display': torch.from_numpy(img).permute(2, 0, 1),
                         'true_concepts': c_true[b].detach().cpu(),
@@ -385,6 +393,10 @@ def save_concept_saliency_maps(
                 )
 
             saved += 1
+        seen += x.shape[0]
+
+        if selected_indices is not None and saved >= len(selected_indices):
+            break
 
     print(f"Saved saliency maps for {saved} samples to {save_dir}")
 
