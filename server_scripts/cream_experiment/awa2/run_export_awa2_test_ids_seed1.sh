@@ -16,9 +16,9 @@ cd "$PROJECT_ROOT"
 echo "HOST=$(hostname)"
 "$PYTHON_BIN" -V
 
-echo "Exporting AWA2 seed=1 test image IDs..."
+echo "Exporting AWA2 seed=1 train/val/test image IDs..."
 "$PYTHON_BIN" scripts/export_test_image_ids.py \
     --config "$CONFIG_PATH" \
-    --split test
+    --split all
 
 echo "Done!"

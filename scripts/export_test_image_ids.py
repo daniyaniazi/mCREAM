@@ -36,7 +36,7 @@ def image_id_from_path(img_path: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--split", default="test", choices=["train", "val", "test"])
+    parser.add_argument("--split", default="test", choices=["train", "val", "test", "all"])
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -45,27 +45,30 @@ def main() -> None:
 
     dataset_class = get_component_with_dicts("dataset", config["dataset_name"])
     datamodule = dataset_class(**config["dataset_params"])
-    datamodule.setup(stage="fit" if args.split in ("train", "val") else "test")
+    splits = ["train", "val", "test"] if args.split == "all" else [args.split]
+    datamodule.setup(stage="fit")
+    datamodule.setup(stage="test")
 
-    dataset_attr = {
+    exp_dir = get_experiment_dir(args.config, config)
+    output_base = Path(args.output) if args.output else exp_dir / "last_metrics"
+    output_base.mkdir(parents=True, exist_ok=True)
+
+    dataset_attrs = {
         "train": "train_dataset",
         "val": "val_dataset",
         "test": "test_data",
-    }[args.split]
-    dataset = getattr(datamodule, dataset_attr)
+    }
 
-    image_ids = [image_id_from_path(item["img_path"]) for item in dataset.data]
-
-    if args.output:
-        output_path = Path(args.output)
-    else:
-        exp_dir = get_experiment_dir(args.config, config)
-        output_path = exp_dir / "last_metrics" / f"{args.split}_image_ids.txt"
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(image_ids) + "\n")
-
-    print(f"Saved {len(image_ids)} {args.split} image IDs to {output_path}")
+    for split in splits:
+        dataset = getattr(datamodule, dataset_attrs[split])
+        image_ids = [image_id_from_path(item["img_path"]) for item in dataset.data]
+        labels = [item["class_label"] for item in dataset.data]
+        output_path = output_base / f"{split}_image_ids.txt"
+        output_path.write_text("\n".join(image_ids) + "\n")
+        print(
+            f"Saved {len(image_ids)} {split} image IDs "
+            f"({len(set(labels))} classes) to {output_path}"
+        )
 
 
 if __name__ == "__main__":

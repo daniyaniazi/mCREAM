@@ -7,6 +7,7 @@ CONFIG_PATH="all_configs/best_hparams/CREAM/CREAM_awa2_soft_seed1_config.yaml"
 HEATMAP_IMAGES=5
 HEATMAP_INDICES=""
 HEATMAP_IDS_FILE="/home/dani00003/mCREAM/server_scripts/cream_experiment/awa2/AwA2_IDs.txt"
+HEATMAP_RANDOM_VAL=3
 
 if [ -x "$CONDA_PYTHON" ]; then
     PYTHON_BIN="$CONDA_PYTHON"
@@ -27,18 +28,24 @@ if [ -n "$HEATMAP_IDS_FILE" ]; then
     "$PYTHON_BIN" evaluate_metrics.py \
         --config "$CONFIG_PATH" \
         --heatmap_ids "$HEATMAP_IDS_FILE" \
+        --heatmap_search_splits test,val \
+        --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
         --only_heatmaps
 elif [ -n "$HEATMAP_INDICES" ]; then
     echo "Generating CREAM AWA2 seed=1 heatmaps for test indices: $HEATMAP_INDICES..."
     "$PYTHON_BIN" evaluate_metrics.py \
         --config "$CONFIG_PATH" \
         --heatmap_indices "$HEATMAP_INDICES" \
+        --heatmap_split test \
+        --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
         --only_heatmaps
 else
     echo "Generating CREAM AWA2 seed=1 heatmaps for first $HEATMAP_IMAGES test samples..."
     "$PYTHON_BIN" evaluate_metrics.py \
         --config "$CONFIG_PATH" \
         --heatmap_images "$HEATMAP_IMAGES" \
+        --heatmap_split test \
+        --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
         --only_heatmaps
 fi
 
