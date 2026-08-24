@@ -6,7 +6,7 @@ CONDA_PYTHON="/home/dani00003/miniconda3/envs/mcream/bin/python"
 CONFIG_PATH="all_configs/best_hparams/CREAM/CREAM_cub_soft_seed0_config.yaml"
 HEATMAP_IMAGES=5
 HEATMAP_INDICES=""
-HEATMAP_IDS_FILE=""
+HEATMAP_IDS_FILE="/home/dani00003/mCREAM/server_scripts/cream_experiment/cub/CUB_IDs.txt"
 
 if [ -x "$CONDA_PYTHON" ]; then
     PYTHON_BIN="$CONDA_PYTHON"
