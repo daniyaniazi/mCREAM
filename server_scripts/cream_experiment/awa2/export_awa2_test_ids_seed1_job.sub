@@ -1,0 +1,15 @@
+universe                = docker
+docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/awa2/run_export_awa2_test_ids_seed1.sh
+
+output                  = /home/dani00003/mCREAM/logs/export_awa2_test_ids_seed1.$(ClusterId).$(ProcId).out
+error                   = /home/dani00003/mCREAM/logs/export_awa2_test_ids_seed1.$(ClusterId).$(ProcId).err
+log                     = /home/dani00003/mCREAM/logs/export_awa2_test_ids_seed1.$(ClusterId).log
+
+request_GPUs            = 0
+request_CPUs            = 2
+request_memory          = 8G
+requirements            = UidDomain == "cs.uni-saarland.de"
++WantGPUHomeMounted     = true
+queue 1
