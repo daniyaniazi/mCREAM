@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+condor_submit server_scripts/cream_experiment/celeba/graph_sanity/CREAM_celeba_graph_sanity_original_job.sub
+condor_submit server_scripts/cream_experiment/celeba/graph_sanity/CREAM_celeba_graph_sanity_all_ones_job.sub
+condor_submit server_scripts/cream_experiment/celeba/graph_sanity/CREAM_celeba_graph_sanity_identity_job.sub
+condor_submit server_scripts/cream_experiment/celeba/graph_sanity/CREAM_celeba_graph_sanity_random_same_edges_job.sub
