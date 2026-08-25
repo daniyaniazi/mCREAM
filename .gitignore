@@ -8,9 +8,9 @@ __pycache__/
 
 server_scripts/data/
 experiments/
-data/FashionMNIST/
-data/CUB/
-data/CelebA
+# data/FashionMNIST/
+# data/CUB/
+# data/CelebA
 
 pretrained_models/
 logs*/

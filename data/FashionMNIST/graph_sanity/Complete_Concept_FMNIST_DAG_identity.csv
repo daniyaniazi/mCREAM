@@ -1,0 +1,22 @@
+,Clothes,Tops,Bottoms,Dresses,Outers,Goods,Accessories,Shoes,Summer,Winter,Mild Seasons,T-Shirt,Trouser,Pullover,Dress,Coat,Sandal,Shirt,Sneaker,Bag,Ankle boot
+Clothes,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Tops,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Bottoms,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Dresses,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Outers,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Goods,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Accessories,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+Shoes,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False
+Summer,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False
+Winter,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False
+Mild Seasons,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False
+T-Shirt,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False
+Trouser,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False
+Pullover,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False
+Dress,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False
+Coat,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False
+Sandal,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,False
+Shirt,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False
+Sneaker,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False
+Bag,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False
+Ankle boot,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True
