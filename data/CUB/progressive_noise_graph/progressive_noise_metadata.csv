@@ -1,0 +1,11 @@
+dataset,dag_path,noise_percent,different_edges,total_edge_positions,graph_distance,added_edges,deleted_edges,original_edges,perturbed_edges
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_010.csv,10,9734,97344,0.09999589086127547,6750,2984,30088,33854
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_020.csv,20,19469,97344,0.20000205456936226,13510,5959,30088,37639
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_030.csv,30,29203,97344,0.29999794543063774,20197,9006,30088,41279
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_040.csv,40,38938,97344,0.40000410913872453,26937,12001,30088,45024
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_050.csv,50,48672,97344,0.5,33612,15060,30088,48640
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_060.csv,60,58406,97344,0.5999958908612755,40410,17996,30088,52502
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_070.csv,70,68141,97344,0.7000020545693623,47047,21094,30088,56041
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_080.csv,80,77875,97344,0.7999979454306377,53769,24106,30088,59751
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_090.csv,90,87610,97344,0.9000041091387245,60537,27073,30088,63552
+cub,./data/CUB/progressive_noise_graph/CUB_DAG_only_Gc_noise_100.csv,100,97344,97344,1.0,67256,30088,30088,67256
