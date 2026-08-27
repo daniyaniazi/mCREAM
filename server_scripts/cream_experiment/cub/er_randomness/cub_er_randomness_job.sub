@@ -1,0 +1,15 @@
+universe                = docker
+docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/cub/er_randomness/run_cub_er_randomness.sh
+
+output                  = /home/dani00003/mCREAM/logs/cub_er_randomness.$(ClusterId).$(ProcId).out
+error                   = /home/dani00003/mCREAM/logs/cub_er_randomness.$(ClusterId).$(ProcId).err
+log                     = /home/dani00003/mCREAM/logs/cub_er_randomness.$(ClusterId).log
+
+request_GPUs            = 0
+request_CPUs            = 4
+request_memory          = 16G
+requirements            = UidDomain == "cs.uni-saarland.de"
++WantGPUHomeMounted     = true
+queue 1
