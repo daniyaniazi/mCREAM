@@ -310,13 +310,16 @@ def save_concept_saliency_maps(
     img_size: int = 224,
     save_pt: bool = True,
     sample_indices: Optional[List[int]] = None,
+    top_k_concepts: Optional[int] = None,
 ):
     """
     Save per-concept CAM overlays as PNGs for the first n_images test samples,
     or for explicit test-set sample_indices when provided.
+    When top_k_concepts is set, save only the highest-scoring predicted concepts.
     Output: save_dir/sample_{i}/concept_{name}.png and sample_{i}_heatmaps.pt.
     """
     import os
+    import csv
     import matplotlib.pyplot as plt
 
     model.eval().to(device)
@@ -335,7 +338,7 @@ def save_concept_saliency_maps(
         x = x.to(device)
 
         handle, storage = _hook_layer4(model)
-        model(x)
+        _, c_pred = model(x)
         handle.remove()
 
         feat_map = storage['feat']                                    # (B, C, H, W)
@@ -358,8 +361,35 @@ def save_concept_saliency_maps(
             img = img.clamp(0, 1).permute(1, 2, 0).numpy()
 
             active_concepts = c_true[b].nonzero(as_tuple=True)[0].tolist()
+            concept_logits = c_pred[b].detach().cpu()
+            concept_scores = torch.sigmoid(concept_logits)
+            if top_k_concepts is None:
+                selected_concepts = list(range(len(concept_names)))
+            else:
+                k = min(top_k_concepts, len(concept_names))
+                selected_concepts = torch.topk(concept_scores, k=k).indices.tolist()
 
-            for ci in range(len(concept_names)):
+            ranking_path = os.path.join(sample_dir, f'sample_{sample_idx}_concept_ranking.csv')
+            with open(ranking_path, 'w', newline='') as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=['rank', 'concept_index', 'concept_name', 'logit_before_sigmoid', 'score_after_sigmoid', 'active'],
+                )
+                writer.writeheader()
+                ranked_indices = torch.argsort(concept_scores, descending=True).tolist()
+                for rank, ci in enumerate(ranked_indices, start=1):
+                    writer.writerow(
+                        {
+                            'rank': rank,
+                            'concept_index': ci,
+                            'concept_name': concept_names[ci],
+                            'logit_before_sigmoid': float(concept_logits[ci]),
+                            'score_after_sigmoid': float(concept_scores[ci]),
+                            'active': ci in active_concepts,
+                        }
+                    )
+
+            for rank, ci in enumerate(selected_concepts, start=1):
                 cam_map = cams_up[b, ci].cpu().numpy()  # (224, 224)
                 name = concept_names[ci]
                 active = ci in active_concepts
@@ -368,11 +398,11 @@ def save_concept_saliency_maps(
                 axes[0].imshow(img); axes[0].set_title('Image'); axes[0].axis('off')
                 axes[1].imshow(img)
                 axes[1].imshow(cam_map, alpha=0.5, cmap='jet')
-                title = f'{name} ({"active" if active else "inactive"})'
+                title = f'top{rank}: {name} ({concept_scores[ci]:.3f}, {"active" if active else "inactive"})'
                 axes[1].set_title(title); axes[1].axis('off')
                 plt.tight_layout()
                 safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in name)
-                fname = os.path.join(sample_dir, f'concept_{ci:03d}_{safe_name}.png')
+                fname = os.path.join(sample_dir, f'top_{rank:02d}_concept_{ci:03d}_{safe_name}.png')
                 plt.savefig(fname, dpi=80, bbox_inches='tight')
                 plt.close()
 
@@ -385,6 +415,9 @@ def save_concept_saliency_maps(
                         'image_display': torch.from_numpy(img).permute(2, 0, 1),
                         'true_concepts': c_true[b].detach().cpu(),
                         'active_concept_indices': active_concepts,
+                        'saved_concept_indices': selected_concepts,
+                        'concept_logits': concept_logits,
+                        'concept_scores': concept_scores,
                         'concept_names': concept_names,
                         'cams_layer4': cams[b].detach().cpu(),
                         'cams_up': cams_up[b].detach().cpu(),

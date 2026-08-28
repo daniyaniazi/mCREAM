@@ -130,6 +130,7 @@ def main():
     parser.add_argument('--heatmap_split', default='test', choices=['train', 'val', 'test'], help='Split used with --heatmap_images/--heatmap_indices')
     parser.add_argument('--heatmap_search_splits', default='test,val', help='Comma-separated splits searched with --heatmap_ids')
     parser.add_argument('--heatmap_random_val', type=int, default=0, help='Also export this many random validation samples')
+    parser.add_argument('--heatmap_top_k', type=int, default=None, help='Save only the top-k predicted concept heatmaps per image')
     parser.add_argument('--only_heatmaps', action='store_true', help='Export CAM heatmaps and skip NEC/ANEC/ADI')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
@@ -252,6 +253,7 @@ def main():
                 n_images=args.heatmap_images,
                 save_pt=True,
                 sample_indices=heatmap_indices,
+                top_k_concepts=args.heatmap_top_k,
             )
 
         if args.only_heatmaps:

@@ -8,6 +8,7 @@ HEATMAP_IMAGES=5
 HEATMAP_INDICES=""
 HEATMAP_IDS_FILE="/home/dani00003/mCREAM/server_scripts/cream_experiment/cub/CUB_IDs.txt"
 HEATMAP_RANDOM_VAL=0
+HEATMAP_TOP_K=8
 
 if [ -x "$CONDA_PYTHON" ]; then
     PYTHON_BIN="$CONDA_PYTHON"
@@ -30,6 +31,7 @@ if [ -n "$HEATMAP_IDS_FILE" ]; then
         --heatmap_ids "$HEATMAP_IDS_FILE" \
         --heatmap_search_splits test,val \
         --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
+        --heatmap_top_k "$HEATMAP_TOP_K" \
         --only_heatmaps
 elif [ -n "$HEATMAP_INDICES" ]; then
     echo "Generating CREAM CUB seed=0 heatmaps for test indices: $HEATMAP_INDICES..."
@@ -38,6 +40,7 @@ elif [ -n "$HEATMAP_INDICES" ]; then
         --heatmap_indices "$HEATMAP_INDICES" \
         --heatmap_split test \
         --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
+        --heatmap_top_k "$HEATMAP_TOP_K" \
         --only_heatmaps
 else
     echo "Generating CREAM CUB seed=0 heatmaps for first $HEATMAP_IMAGES test samples..."
@@ -46,6 +49,7 @@ else
         --heatmap_images "$HEATMAP_IMAGES" \
         --heatmap_split test \
         --heatmap_random_val "$HEATMAP_RANDOM_VAL" \
+        --heatmap_top_k "$HEATMAP_TOP_K" \
         --only_heatmaps
 fi
 
