@@ -316,10 +316,11 @@ def save_concept_saliency_maps(
     Save per-concept CAM overlays as PNGs for the first n_images test samples,
     or for explicit test-set sample_indices when provided.
     When top_k_concepts is set, save only the highest-scoring predicted concepts.
-    Output: save_dir/sample_{i}/concept_{name}.png and sample_{i}_heatmaps.pt.
+    Output: one original PNG, top-k overlay PNGs, ranking CSV, and structured .pt per sample folder.
     """
     import os
     import csv
+    from pathlib import Path
     import matplotlib.pyplot as plt
 
     model.eval().to(device)
@@ -331,14 +332,55 @@ def save_concept_saliency_maps(
     saved = 0
     seen = 0
     selected_indices = set(sample_indices) if sample_indices is not None else None
+    dataset_items = getattr(getattr(dataloader, 'dataset', None), 'data', None)
+
+    def _safe_path_name(name: str) -> str:
+        return ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in name)
+
+    def _image_metadata(sample_idx: int) -> dict:
+        fallback = {
+            'fname': f'sample_{sample_idx}',
+            'original_image_path': None,
+            'gt_class_name_from_path': None,
+        }
+        if dataset_items is None:
+            return fallback
+        try:
+            item = dataset_items[sample_idx]
+            img_path = str(item.get('img_path', ''))
+            path = Path(img_path)
+            fname = path.stem or f'sample_{sample_idx}'
+            parent = path.parent.name
+            class_name = parent.split('.', 1)[1] if '.' in parent else parent or None
+            return {
+                'fname': _safe_path_name(fname),
+                'original_image_path': img_path,
+                'gt_class_name_from_path': class_name,
+            }
+        except Exception:
+            return fallback
+
+    class_names_by_idx = {}
+    if dataset_items is not None:
+        for item in dataset_items:
+            try:
+                label = int(item.get('class_label'))
+                img_path = Path(str(item.get('img_path', '')))
+                parent = img_path.parent.name
+                class_name = parent.split('.', 1)[1] if '.' in parent else parent
+                if class_name:
+                    class_names_by_idx.setdefault(label, class_name)
+            except Exception:
+                continue
+
     for batch in dataloader:
         if selected_indices is None and saved >= n_images:
             break
-        x, c_true, _ = batch
+        x, c_true, y_true = batch
         x = x.to(device)
 
         handle, storage = _hook_layer4(model)
-        _, c_pred = model(x)
+        y_logits, c_pred = model(x)
         handle.remove()
 
         feat_map = storage['feat']                                    # (B, C, H, W)
@@ -353,7 +395,9 @@ def save_concept_saliency_maps(
             if selected_indices is not None and sample_idx not in selected_indices:
                 continue
 
-            sample_dir = os.path.join(save_dir, f'sample_{sample_idx}')
+            image_meta = _image_metadata(sample_idx)
+            image_fname = image_meta['fname']
+            sample_dir = os.path.join(save_dir, image_fname)
             os.makedirs(sample_dir, exist_ok=True)
 
             # denormalize image for display
@@ -363,11 +407,30 @@ def save_concept_saliency_maps(
             active_concepts = c_true[b].nonzero(as_tuple=True)[0].tolist()
             concept_logits = c_pred[b].detach().cpu()
             concept_scores = torch.sigmoid(concept_logits)
+            class_logits = y_logits[b].detach().cpu()
+            true_class_tensor = y_true[b].detach().cpu()
+            if class_logits.ndim > 0 and class_logits.numel() > 1:
+                class_scores = torch.softmax(class_logits, dim=0)
+                pred_class = int(torch.argmax(class_logits).item())
+                pred_class_score = float(class_scores[pred_class].item())
+            else:
+                class_scores = torch.sigmoid(class_logits.reshape(-1))
+                pred_class_score = float(torch.sigmoid(class_logits.reshape(-1)[0]).item())
+                pred_class = int(pred_class_score >= 0.5)
+            if true_class_tensor.ndim > 0 and true_class_tensor.numel() > 1:
+                true_class = int(torch.argmax(true_class_tensor).item())
+            else:
+                true_class = int(true_class_tensor.reshape(-1)[0].item())
+            predicted_class_name = class_names_by_idx.get(pred_class, f'class_{pred_class}')
+            gt_class_name = image_meta['gt_class_name_from_path'] or class_names_by_idx.get(true_class, f'class_{true_class}')
             if top_k_concepts is None:
                 selected_concepts = list(range(len(concept_names)))
             else:
                 k = min(top_k_concepts, len(concept_names))
                 selected_concepts = torch.topk(concept_scores, k=k).indices.tolist()
+
+            original_path = os.path.join(sample_dir, f'{image_fname}_original.png')
+            plt.imsave(original_path, img)
 
             ranking_path = os.path.join(sample_dir, f'sample_{sample_idx}_concept_ranking.csv')
             with open(ranking_path, 'w', newline='') as f:
@@ -394,33 +457,104 @@ def save_concept_saliency_maps(
                 name = concept_names[ci]
                 active = ci in active_concepts
 
-                _, axes = plt.subplots(1, 2, figsize=(6, 3))
-                axes[0].imshow(img); axes[0].set_title('Image'); axes[0].axis('off')
-                axes[1].imshow(img)
-                axes[1].imshow(cam_map, alpha=0.5, cmap='jet')
+                _, ax = plt.subplots(1, 1, figsize=(3, 3))
+                ax.imshow(img)
+                ax.imshow(cam_map, alpha=0.5, cmap='jet')
                 title = f'top{rank}: {name} ({concept_scores[ci]:.3f}, {"active" if active else "inactive"})'
-                axes[1].set_title(title); axes[1].axis('off')
+                ax.set_title(title); ax.axis('off')
                 plt.tight_layout()
-                safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in name)
-                fname = os.path.join(sample_dir, f'top_{rank:02d}_concept_{ci:03d}_{safe_name}.png')
-                plt.savefig(fname, dpi=80, bbox_inches='tight')
+                safe_name = _safe_path_name(name)
+                png_path = os.path.join(sample_dir, f'top_{rank:02d}_concept_{ci:03d}_{safe_name}.png')
+                plt.savefig(png_path, dpi=80, bbox_inches='tight')
                 plt.close()
 
             if save_pt:
-                pt_path = os.path.join(sample_dir, f'sample_{sample_idx}_heatmaps.pt')
+                pt_path = os.path.join(sample_dir, f'{image_fname}.pt')
+                selected_tensor = torch.tensor(selected_concepts, dtype=torch.long)
+                top_concept_names = [concept_names[ci] for ci in selected_concepts]
+                top_concept_logits = concept_logits[selected_tensor]
+                top_concept_scores = concept_scores[selected_tensor]
+                ranked_indices = torch.argsort(concept_scores, descending=True).tolist()
+                concept_ranking = [
+                    {
+                        'rank': rank,
+                        'concept_index': int(ci),
+                        'concept_name': concept_names[ci],
+                        'logit_before_sigmoid': float(concept_logits[ci]),
+                        'score_after_sigmoid': float(concept_scores[ci]),
+                        'active': ci in active_concepts,
+                    }
+                    for rank, ci in enumerate(ranked_indices, start=1)
+                ]
+                heatmaps = {
+                    int(ci): cams_up[b, ci].detach().cpu().unsqueeze(0).unsqueeze(0)
+                    for ci in selected_concepts
+                }
                 torch.save(
                     {
+                        'fname': image_fname,
                         'sample_index': sample_idx,
+                        'image_index': sample_idx,
+                        'original_image_path': image_meta['original_image_path'],
+                        'saved_original_image_path': original_path,
+                        'sample_dir': sample_dir,
+                        'true_class': true_class,
+                        'pred_class': pred_class,
+                        'predicted_class': pred_class,
+                        'predicted_class_name': predicted_class_name,
+                        'gt_class_name': gt_class_name,
+                        'pred_class_score': pred_class_score,
+                        'class_logits': class_logits,
+                        'class_scores': class_scores,
                         'image_normalized': x[b].detach().cpu(),
                         'image_display': torch.from_numpy(img).permute(2, 0, 1),
                         'true_concepts': c_true[b].detach().cpu(),
                         'active_concept_indices': active_concepts,
                         'saved_concept_indices': selected_concepts,
+                        'top_concepts': selected_concepts,
+                        'top_concept_names': top_concept_names,
+                        'top_concept_logits': top_concept_logits,
+                        'top_concept_scores': top_concept_scores,
+                        'concept_ranking': concept_ranking,
                         'concept_logits': concept_logits,
                         'concept_scores': concept_scores,
                         'concept_names': concept_names,
                         'cams_layer4': cams[b].detach().cpu(),
                         'cams_up': cams_up[b].detach().cpu(),
+                        'heatmaps': heatmaps,
+                        'sample': {
+                            'image_index': sample_idx,
+                            'fname': image_fname,
+                            'original_image_path': image_meta['original_image_path'],
+                            'saved_original_image_path': original_path,
+                            'sample_dir': sample_dir,
+                            'true_class': true_class,
+                            'pred_class': pred_class,
+                            'predicted_class': pred_class,
+                            'predicted_class_name': predicted_class_name,
+                            'gt_class_name': gt_class_name,
+                            'pred_class_score': pred_class_score,
+                            'class_logits': class_logits,
+                            'class_scores': class_scores,
+                        },
+                        'concepts': {
+                            'names': concept_names,
+                            'true_binary': c_true[b].detach().cpu(),
+                            'active_indices': active_concepts,
+                            'logits_before_sigmoid': concept_logits,
+                            'scores_after_sigmoid': concept_scores,
+                            'ranking': concept_ranking,
+                            'saved_top_k_indices': selected_concepts,
+                            'saved_top_k_names': top_concept_names,
+                            'saved_top_k_logits_before_sigmoid': top_concept_logits,
+                            'saved_top_k_scores_after_sigmoid': top_concept_scores,
+                        },
+                        'attributions': {
+                            'layer4_maps_all_concepts': cams[b].detach().cpu(),
+                            'upsampled_maps_all_concepts': cams_up[b].detach().cpu(),
+                            'upsampled_maps_saved_top_k': cams_up[b, selected_tensor].detach().cpu(),
+                            'heatmaps_saved_top_k_by_concept_index': heatmaps,
+                        },
                     },
                     pt_path,
                 )
