@@ -1,0 +1,9 @@
+,Arched_Eyebrows,Bags_Under_Eyes,Double_Chin,High_Cheekbones,Mouth_Slightly_Open,Narrow_Eyes,Rosy_Cheeks,Smiling
+Arched_Eyebrows,False,True,True,False,False,False,False,True
+Bags_Under_Eyes,False,False,True,False,True,False,True,True
+Double_Chin,True,False,False,True,True,True,True,True
+High_Cheekbones,True,True,True,True,True,True,True,False
+Mouth_Slightly_Open,False,True,True,False,False,True,True,True
+Narrow_Eyes,True,False,True,False,False,True,False,False
+Rosy_Cheeks,True,True,True,False,True,True,False,True
+Smiling,False,True,True,False,True,False,False,False

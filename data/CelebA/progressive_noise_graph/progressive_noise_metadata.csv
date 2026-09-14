@@ -1,0 +1,11 @@
+dataset,dag_path,noise_percent,different_edges,total_edge_positions,graph_distance,added_edges,deleted_edges,original_edges,perturbed_edges
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_010.csv,10,6,64,0.09375,5,1,18,22
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_020.csv,20,13,64,0.203125,10,3,18,25
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_030.csv,30,19,64,0.296875,12,7,18,23
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_040.csv,40,26,64,0.40625,21,5,18,34
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_050.csv,50,32,64,0.5,23,9,18,32
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_060.csv,60,38,64,0.59375,26,12,18,32
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_070.csv,70,45,64,0.703125,32,13,18,37
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_080.csv,80,51,64,0.796875,38,13,18,43
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_090.csv,90,58,64,0.90625,40,18,18,40
+celeba,./data/CelebA/progressive_noise_graph/final_DAG_unfair_noise_100.csv,100,64,64,1.0,46,18,18,46
