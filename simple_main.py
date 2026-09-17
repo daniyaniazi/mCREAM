@@ -453,6 +453,7 @@ def my_main(config_path: Path) -> None:
                     batch_size=batch_size,
                     thresh=0.05,
                     bar=False,
+                    max_time=None,
                 )
 
                 explanation_values = dict(zip(test_group_names, sage_values.values))
@@ -481,8 +482,11 @@ def my_main(config_path: Path) -> None:
                 results = run_sage(
                     concept_set, train_latent, test_latent, config, results
                 )
-            except:
-                print("Sage TimeoutError")
+            except Exception as e:
+                print(f"SAGE failed: {type(e).__name__}: {e}")
+                results["CCI"] = None
+                results["debugging_sage_metrics_concepts"] = None
+                results["debugging_sage_metrics_side_channel"] = None
                 results[concept_set + "_concept_grouped_importance"] = None
                 results[concept_set + "_debugging_sage_metrics_concepts"] = None
                 results[concept_set + "_debugging_sage_metrics_side_channel"] = None
