@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+cub,topology_random_full,rand_topology_00,./data/CUB/topology_random_full/CUB_DAG_only_Gc_rand_topology_00_edges_30088.csv,30088,30088,97344,0.3090894148586456,42
+cub,topology_random_full,rand_topology_01,./data/CUB/topology_random_full/CUB_DAG_only_Gc_rand_topology_01_edges_30088.csv,30088,30088,97344,0.3090894148586456,43
+cub,topology_random_full,rand_topology_02,./data/CUB/topology_random_full/CUB_DAG_only_Gc_rand_topology_02_edges_30088.csv,30088,30088,97344,0.3090894148586456,44
+cub,topology_random_full,rand_topology_03,./data/CUB/topology_random_full/CUB_DAG_only_Gc_rand_topology_03_edges_30088.csv,30088,30088,97344,0.3090894148586456,45
+cub,topology_random_full,rand_topology_04,./data/CUB/topology_random_full/CUB_DAG_only_Gc_rand_topology_04_edges_30088.csv,30088,30088,97344,0.3090894148586456,46

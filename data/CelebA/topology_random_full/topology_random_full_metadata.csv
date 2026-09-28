@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+celeba,topology_random_full,rand_topology_00,./data/CelebA/topology_random_full/final_DAG_unfair_rand_topology_00_edges_18.csv,18,18,64,0.28125,42
+celeba,topology_random_full,rand_topology_01,./data/CelebA/topology_random_full/final_DAG_unfair_rand_topology_01_edges_18.csv,18,18,64,0.28125,43
+celeba,topology_random_full,rand_topology_02,./data/CelebA/topology_random_full/final_DAG_unfair_rand_topology_02_edges_18.csv,18,18,64,0.28125,44
+celeba,topology_random_full,rand_topology_03,./data/CelebA/topology_random_full/final_DAG_unfair_rand_topology_03_edges_18.csv,18,18,64,0.28125,45
+celeba,topology_random_full,rand_topology_04,./data/CelebA/topology_random_full/final_DAG_unfair_rand_topology_04_edges_18.csv,18,18,64,0.28125,46

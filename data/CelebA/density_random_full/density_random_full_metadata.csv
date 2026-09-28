@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+celeba,density_random_full,edges_00009,./data/CelebA/density_random_full/final_DAG_unfair_edges_00009.csv,18,9,64,0.140625,10042
+celeba,density_random_full,edges_00014,./data/CelebA/density_random_full/final_DAG_unfair_edges_00014.csv,18,14,64,0.21875,10043
+celeba,density_random_full,edges_00018,./data/CelebA/density_random_full/final_DAG_unfair_edges_00018.csv,18,18,64,0.28125,10044
+celeba,density_random_full,edges_00022,./data/CelebA/density_random_full/final_DAG_unfair_edges_00022.csv,18,22,64,0.34375,10045
+celeba,density_random_full,edges_00027,./data/CelebA/density_random_full/final_DAG_unfair_edges_00027.csv,18,27,64,0.421875,10046

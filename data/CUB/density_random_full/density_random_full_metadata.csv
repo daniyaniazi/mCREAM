@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+cub,density_random_full,edges_15044,./data/CUB/density_random_full/CUB_DAG_only_Gc_edges_15044.csv,30088,15044,97344,0.1545447074293228,10042
+cub,density_random_full,edges_22566,./data/CUB/density_random_full/CUB_DAG_only_Gc_edges_22566.csv,30088,22566,97344,0.23181706114398423,10043
+cub,density_random_full,edges_30088,./data/CUB/density_random_full/CUB_DAG_only_Gc_edges_30088.csv,30088,30088,97344,0.3090894148586456,10044
+cub,density_random_full,edges_37610,./data/CUB/density_random_full/CUB_DAG_only_Gc_edges_37610.csv,30088,37610,97344,0.386361768573307,10045
+cub,density_random_full,edges_45132,./data/CUB/density_random_full/CUB_DAG_only_Gc_edges_45132.csv,30088,45132,97344,0.46363412228796846,10046
