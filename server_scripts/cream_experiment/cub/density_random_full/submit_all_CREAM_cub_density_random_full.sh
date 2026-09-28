@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+condor_submit server_scripts/cream_experiment/cub/density_random_full/CREAM_cub_density_random_full_edges_15044_job.sub
+condor_submit server_scripts/cream_experiment/cub/density_random_full/CREAM_cub_density_random_full_edges_22566_job.sub
+condor_submit server_scripts/cream_experiment/cub/density_random_full/CREAM_cub_density_random_full_edges_30088_job.sub
+condor_submit server_scripts/cream_experiment/cub/density_random_full/CREAM_cub_density_random_full_edges_37610_job.sub
+condor_submit server_scripts/cream_experiment/cub/density_random_full/CREAM_cub_density_random_full_edges_45132_job.sub
