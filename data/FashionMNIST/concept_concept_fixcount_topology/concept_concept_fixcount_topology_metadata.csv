@@ -1,0 +1,6 @@
+target_replacement_pct,actual_replacement_pct,target_removed_c2c_edges,capped_by_available_non_edges,original_c2c_edges,available_original_c2c_non_edges,removed_c2c_edges,added_c2c_edges,new_c2c_edges,random_seed,dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges
+0,0.0,0,False,17,104,0,0,17,42,cfmnist,concept_concept_fixcount_topology,replace_000,./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_000.csv,21,11,10,46,46
+20,17.647058823529413,3,False,17,104,3,3,17,62,cfmnist,concept_concept_fixcount_topology,replace_020,./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_020.csv,21,11,10,46,46
+50,47.05882352941176,8,False,17,104,8,8,17,92,cfmnist,concept_concept_fixcount_topology,replace_050,./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_050.csv,21,11,10,46,46
+80,82.35294117647058,14,False,17,104,14,14,17,122,cfmnist,concept_concept_fixcount_topology,replace_080,./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_080.csv,21,11,10,46,46
+100,100.0,17,False,17,104,17,17,17,142,cfmnist,concept_concept_fixcount_topology,replace_100,./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_100.csv,21,11,10,46,46
