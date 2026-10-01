@@ -1,0 +1,52 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_cub_concept_concept_fixcount_topology/replace_050
+dataset_name: CUB
+dataset_params:
+  batch_size: 64
+  workers: 0
+  return_concepts: true
+model_name: Standard_CUB
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CUB/concept_concept_fixcount_topology/CUB_DAG_only_Gc_replace_050.csv
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 648
+  num_side_channel: 200
+  num_concepts: 112
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300
+sanity_check:
+  dataset: cub
+  experiment_type: concept_concept_fixcount_topology
+  graph_variant: replace_050
+  random_scope: concept_concept_block_only
+  fixed_blocks: c2y_task_rows_and_all_non_c2c_entries
+  base_dag: ./data/CUB/CUB_DAG_only_Gc.csv
+  target_replacement_pct: 50
+  actual_replacement_pct: 50.0
+  capped_by_available_non_edges: False
+  original_total_edges: 30088
+  new_total_edges: 30088
+  original_c2c_edges: 7488
+  available_original_c2c_non_edges: 5056
+  new_c2c_edges: 7488
+  target_removed_c2c_edges: 3744
+  removed_c2c_edges: 3744
+  added_c2c_edges: 3744
+  random_seed: 92
