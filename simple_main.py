@@ -443,8 +443,9 @@ def my_main(config_path: Path) -> None:
                     test_groups,
                 )
 
+                sage_n_jobs = max(1, int(workers))
                 estimator = my_PermutationEstimator(
-                    imputer, "cross entropy", random_state=seed, n_jobs=workers
+                    imputer, "cross entropy", random_state=seed, n_jobs=sage_n_jobs
                 )
 
                 sage_values = estimator(
