@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+cfmnist,density_random_full,edges_00023,./data/FashionMNIST/density_random_full/Complete_Concept_FMNIST_DAG_edges_00023.csv,46,23,441,0.05215419501133787,10042
+cfmnist,density_random_full,edges_00034,./data/FashionMNIST/density_random_full/Complete_Concept_FMNIST_DAG_edges_00034.csv,46,34,441,0.07709750566893424,10043
+cfmnist,density_random_full,edges_00046,./data/FashionMNIST/density_random_full/Complete_Concept_FMNIST_DAG_edges_00046.csv,46,46,441,0.10430839002267574,10044
+cfmnist,density_random_full,edges_00058,./data/FashionMNIST/density_random_full/Complete_Concept_FMNIST_DAG_edges_00058.csv,46,58,441,0.13151927437641722,10045
+cfmnist,density_random_full,edges_00069,./data/FashionMNIST/density_random_full/Complete_Concept_FMNIST_DAG_edges_00069.csv,46,69,441,0.1564625850340136,10046

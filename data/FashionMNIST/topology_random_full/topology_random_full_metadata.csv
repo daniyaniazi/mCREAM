@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,original_edge_count,edge_count,total_positions,density,random_seed
+cfmnist,topology_random_full,rand_topology_00,./data/FashionMNIST/topology_random_full/Complete_Concept_FMNIST_DAG_rand_topology_00_edges_46.csv,46,46,441,0.10430839002267574,42
+cfmnist,topology_random_full,rand_topology_01,./data/FashionMNIST/topology_random_full/Complete_Concept_FMNIST_DAG_rand_topology_01_edges_46.csv,46,46,441,0.10430839002267574,43
+cfmnist,topology_random_full,rand_topology_02,./data/FashionMNIST/topology_random_full/Complete_Concept_FMNIST_DAG_rand_topology_02_edges_46.csv,46,46,441,0.10430839002267574,44
+cfmnist,topology_random_full,rand_topology_03,./data/FashionMNIST/topology_random_full/Complete_Concept_FMNIST_DAG_rand_topology_03_edges_46.csv,46,46,441,0.10430839002267574,45
+cfmnist,topology_random_full,rand_topology_04,./data/FashionMNIST/topology_random_full/Complete_Concept_FMNIST_DAG_rand_topology_04_edges_46.csv,46,46,441,0.10430839002267574,46
