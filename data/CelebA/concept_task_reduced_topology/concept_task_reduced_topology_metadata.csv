@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_cy_edges,new_cy_edges,total_cy_positions,target_cy_edge_fraction,target_cy_edges,cy_density,cy_edge_multiplier,random_seed
+celeba,concept_task_reduced_topology,cy_topology_075_00,./data/CelebA/concept_task_reduced_topology/final_DAG_unfair_cy_topology_075_00.csv,8,7,1,18,16,7,5,7,0.75,5,0.7142857142857143,0.7142857142857143,40042
+celeba,concept_task_reduced_topology,cy_topology_075_01,./data/CelebA/concept_task_reduced_topology/final_DAG_unfair_cy_topology_075_01.csv,8,7,1,18,16,7,5,7,0.75,5,0.7142857142857143,0.7142857142857143,40043
+celeba,concept_task_reduced_topology,cy_topology_075_02,./data/CelebA/concept_task_reduced_topology/final_DAG_unfair_cy_topology_075_02.csv,8,7,1,18,16,7,5,7,0.75,5,0.7142857142857143,0.7142857142857143,40044
+celeba,concept_task_reduced_topology,cy_topology_075_03,./data/CelebA/concept_task_reduced_topology/final_DAG_unfair_cy_topology_075_03.csv,8,7,1,18,16,7,5,7,0.75,5,0.7142857142857143,0.7142857142857143,40045
+celeba,concept_task_reduced_topology,cy_topology_075_04,./data/CelebA/concept_task_reduced_topology/final_DAG_unfair_cy_topology_075_04.csv,8,7,1,18,16,7,5,7,0.75,5,0.7142857142857143,0.7142857142857143,40046

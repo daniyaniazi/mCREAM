@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_c2c_edges,new_c2c_edges,total_c2c_positions,c2c_density,c2c_edge_multiplier,random_seed
+celeba,concept_concept_density,c2c_edges_00005,./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00005.csv,8,7,1,18,13,10,5,49,0.10204081632653061,0.5,10042
+celeba,concept_concept_density,c2c_edges_00008,./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00008.csv,8,7,1,18,16,10,8,49,0.16326530612244897,0.8,10043
+celeba,concept_concept_density,c2c_edges_00010,./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00010.csv,8,7,1,18,18,10,10,49,0.20408163265306123,1.0,10044
+celeba,concept_concept_density,c2c_edges_00012,./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00012.csv,8,7,1,18,20,10,12,49,0.24489795918367346,1.2,10045
+celeba,concept_concept_density,c2c_edges_00015,./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00015.csv,8,7,1,18,23,10,15,49,0.30612244897959184,1.5,10046

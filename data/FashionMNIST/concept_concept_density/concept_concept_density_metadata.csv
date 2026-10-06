@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_c2c_edges,new_c2c_edges,total_c2c_positions,c2c_density,c2c_edge_multiplier,random_seed
+cfmnist,concept_concept_density,c2c_edges_00008,./data/FashionMNIST/concept_concept_density/Complete_Concept_FMNIST_DAG_c2c_edges_00008.csv,21,11,10,46,37,17,8,121,0.06611570247933884,0.47058823529411764,10042
+cfmnist,concept_concept_density,c2c_edges_00013,./data/FashionMNIST/concept_concept_density/Complete_Concept_FMNIST_DAG_c2c_edges_00013.csv,21,11,10,46,42,17,13,121,0.10743801652892562,0.7647058823529411,10043
+cfmnist,concept_concept_density,c2c_edges_00017,./data/FashionMNIST/concept_concept_density/Complete_Concept_FMNIST_DAG_c2c_edges_00017.csv,21,11,10,46,46,17,17,121,0.14049586776859505,1.0,10044
+cfmnist,concept_concept_density,c2c_edges_00021,./data/FashionMNIST/concept_concept_density/Complete_Concept_FMNIST_DAG_c2c_edges_00021.csv,21,11,10,46,50,17,21,121,0.17355371900826447,1.2352941176470589,10045
+cfmnist,concept_concept_density,c2c_edges_00026,./data/FashionMNIST/concept_concept_density/Complete_Concept_FMNIST_DAG_c2c_edges_00026.csv,21,11,10,46,55,17,26,121,0.21487603305785125,1.5294117647058822,10046

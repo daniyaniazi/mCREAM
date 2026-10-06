@@ -1,0 +1,4 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_cy_edges,new_cy_edges,total_cy_positions,cy_density,cy_edge_multiplier,random_seed
+cub,concept_task_density,cy_edges_11200,./data/CUB/concept_task_density/CUB_DAG_only_Gc_cy_edges_11200.csv,312,112,200,30088,18888,22400,11200,22400,0.5,0.5,20042
+cub,concept_task_density,cy_edges_16800,./data/CUB/concept_task_density/CUB_DAG_only_Gc_cy_edges_16800.csv,312,112,200,30088,24488,22400,16800,22400,0.75,0.75,20043
+cub,concept_task_density,cy_edges_22400,./data/CUB/concept_task_density/CUB_DAG_only_Gc_cy_edges_22400.csv,312,112,200,30088,30088,22400,22400,22400,1.0,1.0,20044

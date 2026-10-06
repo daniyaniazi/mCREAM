@@ -1,0 +1,6 @@
+target_replacement_pct,actual_replacement_pct,target_removed_cy_edges,capped_by_available_non_edges,original_cy_edges,available_original_cy_non_edges,removed_cy_edges,added_cy_edges,new_cy_edges,random_seed,dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,total_cy_positions
+0,0.0,0,False,22400,0,0,0,22400,30042,cub,concept_task_fixcount_topology,replace_000,./data/CUB/concept_task_fixcount_topology/CUB_DAG_only_Gc_replace_000.csv,312,112,200,30088,30088,22400
+20,0.0,4480,True,22400,0,0,0,22400,30062,cub,concept_task_fixcount_topology,replace_020,./data/CUB/concept_task_fixcount_topology/CUB_DAG_only_Gc_replace_020.csv,312,112,200,30088,30088,22400
+50,0.0,11200,True,22400,0,0,0,22400,30092,cub,concept_task_fixcount_topology,replace_050,./data/CUB/concept_task_fixcount_topology/CUB_DAG_only_Gc_replace_050.csv,312,112,200,30088,30088,22400
+80,0.0,17920,True,22400,0,0,0,22400,30122,cub,concept_task_fixcount_topology,replace_080,./data/CUB/concept_task_fixcount_topology/CUB_DAG_only_Gc_replace_080.csv,312,112,200,30088,30088,22400
+100,0.0,22400,True,22400,0,0,0,22400,30142,cub,concept_task_fixcount_topology,replace_100,./data/CUB/concept_task_fixcount_topology/CUB_DAG_only_Gc_replace_100.csv,312,112,200,30088,30088,22400

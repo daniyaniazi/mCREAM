@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_cy_edges,new_cy_edges,total_cy_positions,target_cy_edge_fraction,target_cy_edges,cy_density,cy_edge_multiplier,random_seed
+cub,concept_task_reduced_topology,cy_topology_075_00,./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_00.csv,312,112,200,30088,24488,22400,16800,22400,0.75,16800,0.75,0.75,40042
+cub,concept_task_reduced_topology,cy_topology_075_01,./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_01.csv,312,112,200,30088,24488,22400,16800,22400,0.75,16800,0.75,0.75,40043
+cub,concept_task_reduced_topology,cy_topology_075_02,./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_02.csv,312,112,200,30088,24488,22400,16800,22400,0.75,16800,0.75,0.75,40044
+cub,concept_task_reduced_topology,cy_topology_075_03,./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_03.csv,312,112,200,30088,24488,22400,16800,22400,0.75,16800,0.75,0.75,40045
+cub,concept_task_reduced_topology,cy_topology_075_04,./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_04.csv,312,112,200,30088,24488,22400,16800,22400,0.75,16800,0.75,0.75,40046

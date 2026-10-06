@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+condor_submit server_scripts/cream_experiment/cub/concept_task_density/CREAM_cub_concept_task_density_cy_edges_11200_job.sub
+condor_submit server_scripts/cream_experiment/cub/concept_task_density/CREAM_cub_concept_task_density_cy_edges_16800_job.sub
+condor_submit server_scripts/cream_experiment/cub/concept_task_density/CREAM_cub_concept_task_density_cy_edges_22400_job.sub

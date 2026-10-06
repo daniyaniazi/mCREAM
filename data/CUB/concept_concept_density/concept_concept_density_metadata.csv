@@ -1,0 +1,6 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_c2c_edges,new_c2c_edges,total_c2c_positions,c2c_density,c2c_edge_multiplier,random_seed
+cub,concept_concept_density,c2c_edges_03744,./data/CUB/concept_concept_density/CUB_DAG_only_Gc_c2c_edges_03744.csv,312,112,200,30088,26344,7488,3744,12544,0.29846938775510207,0.5,10042
+cub,concept_concept_density,c2c_edges_05616,./data/CUB/concept_concept_density/CUB_DAG_only_Gc_c2c_edges_05616.csv,312,112,200,30088,28216,7488,5616,12544,0.4477040816326531,0.75,10043
+cub,concept_concept_density,c2c_edges_07488,./data/CUB/concept_concept_density/CUB_DAG_only_Gc_c2c_edges_07488.csv,312,112,200,30088,30088,7488,7488,12544,0.5969387755102041,1.0,10044
+cub,concept_concept_density,c2c_edges_09360,./data/CUB/concept_concept_density/CUB_DAG_only_Gc_c2c_edges_09360.csv,312,112,200,30088,31960,7488,9360,12544,0.7461734693877551,1.25,10045
+cub,concept_concept_density,c2c_edges_11232,./data/CUB/concept_concept_density/CUB_DAG_only_Gc_c2c_edges_11232.csv,312,112,200,30088,33832,7488,11232,12544,0.8954081632653061,1.5,10046

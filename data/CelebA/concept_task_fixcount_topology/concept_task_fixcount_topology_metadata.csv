@@ -1,0 +1,6 @@
+target_replacement_pct,actual_replacement_pct,target_removed_cy_edges,capped_by_available_non_edges,original_cy_edges,available_original_cy_non_edges,removed_cy_edges,added_cy_edges,new_cy_edges,random_seed,dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,total_cy_positions
+0,0.0,0,False,7,0,0,0,7,30042,celeba,concept_task_fixcount_topology,replace_000,./data/CelebA/concept_task_fixcount_topology/final_DAG_unfair_replace_000.csv,8,7,1,18,18,7
+20,0.0,1,True,7,0,0,0,7,30062,celeba,concept_task_fixcount_topology,replace_020,./data/CelebA/concept_task_fixcount_topology/final_DAG_unfair_replace_020.csv,8,7,1,18,18,7
+50,0.0,4,True,7,0,0,0,7,30092,celeba,concept_task_fixcount_topology,replace_050,./data/CelebA/concept_task_fixcount_topology/final_DAG_unfair_replace_050.csv,8,7,1,18,18,7
+80,0.0,6,True,7,0,0,0,7,30122,celeba,concept_task_fixcount_topology,replace_080,./data/CelebA/concept_task_fixcount_topology/final_DAG_unfair_replace_080.csv,8,7,1,18,18,7
+100,0.0,7,True,7,0,0,0,7,30142,celeba,concept_task_fixcount_topology,replace_100,./data/CelebA/concept_task_fixcount_topology/final_DAG_unfair_replace_100.csv,8,7,1,18,18,7

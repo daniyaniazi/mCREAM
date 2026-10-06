@@ -1,0 +1,4 @@
+dataset,experiment_type,variant,dag_path,num_nodes,num_concepts,num_classes,original_total_edges,new_total_edges,original_cy_edges,new_cy_edges,total_cy_positions,cy_density,cy_edge_multiplier,random_seed
+celeba,concept_task_density,cy_edges_00004,./data/CelebA/concept_task_density/final_DAG_unfair_cy_edges_00004.csv,8,7,1,18,15,7,4,7,0.5714285714285714,0.5714285714285714,20042
+celeba,concept_task_density,cy_edges_00005,./data/CelebA/concept_task_density/final_DAG_unfair_cy_edges_00005.csv,8,7,1,18,16,7,5,7,0.7142857142857143,0.7142857142857143,20043
+celeba,concept_task_density,cy_edges_00007,./data/CelebA/concept_task_density/final_DAG_unfair_cy_edges_00007.csv,8,7,1,18,18,7,7,7,1.0,1.0,20044
