@@ -1,0 +1,50 @@
+mode: train_cbm
+seed: [42,7,1,134,89]
+experiment_name: CREAM_cub_concept_task_reduced_topology_no_side_channel/cy_topology_075_02
+dataset_name: CUB
+dataset_params:
+  batch_size: 64
+  workers: 2
+  return_concepts: true
+model_name: Standard_CUB
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CUB/concept_task_reduced_topology/CUB_DAG_only_Gc_cy_topology_075_02.csv
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
+  input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 112
+  num_side_channel: 0
+  num_concepts: 112
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300
+sanity_check:
+  dataset: cub
+  experiment_type: concept_task_reduced_topology
+  graph_variant: cy_topology_075_02
+  random_scope: concept_task_block_only
+  fixed_blocks: c2c_and_all_non_cy_entries
+  base_dag: ./data/CUB/CUB_DAG_only_Gc.csv
+  original_total_edges: 30088
+  new_total_edges: 24488
+  original_cy_edges: 22400
+  new_cy_edges: 16800
+  total_cy_positions: 22400
+  random_seed: 40044
+  cy_density: 0.75
+  cy_edge_multiplier: 0.75
+  no_side_channel: true
+  source_experiment_type: concept_task_reduced_topology

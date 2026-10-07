@@ -1,0 +1,55 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_cfmnist_concept_concept_fixcount_topology_no_side_channel/replace_080
+dataset_name: Complete_Concept_FMNIST
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: true
+  return_images: true
+model_name: Standard_FashionMNIST
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/FashionMNIST/concept_concept_fixcount_topology/Complete_Concept_FMNIST_DAG_replace_080.csv
+  input_model_path: ./pretrained_models/FMNIST/version_0/checkpoints/epoch=49-step=10750.ckpt
+  softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
+hyperparameters_model2:
+  num_classes: 10
+  num_exogenous: 22
+  num_side_channel: 0
+  num_concepts: 11
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 128
+  last_layer_mask: true
+  concept_representation: group_soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 50
+sanity_check:
+  dataset: cfmnist
+  experiment_type: concept_concept_fixcount_topology
+  graph_variant: replace_080
+  random_scope: concept_concept_block_only
+  fixed_blocks: c2y_task_rows_and_all_non_c2c_entries
+  base_dag: ./data/FashionMNIST/Complete_Concept_FMNIST_DAG.csv
+  target_replacement_pct: 80
+  actual_replacement_pct: 82.35294117647058
+  capped_by_available_non_edges: False
+  original_total_edges: 46
+  new_total_edges: 46
+  original_c2c_edges: 17
+  available_original_c2c_non_edges: 104
+  new_c2c_edges: 17
+  target_removed_c2c_edges: 14
+  removed_c2c_edges: 14
+  added_c2c_edges: 14
+  random_seed: 122
+  no_side_channel: true
+  source_experiment_type: concept_concept_fixcount_topology

@@ -1,0 +1,49 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_celeba_concept_concept_density_no_side_channel/c2c_edges_00008
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+model_name: Standard_CelebA
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/concept_concept_density/final_DAG_unfair_c2c_edges_00008.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+hyperparameters_model2:
+  num_classes: 1
+  num_exogenous: 7
+  num_side_channel: 0
+  num_concepts: 7
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 0.75
+  frozen_model1: true
+trainer_param:
+  max_epochs: 200
+sanity_check:
+  dataset: celeba
+  experiment_type: concept_concept_density
+  graph_variant: c2c_edges_00008
+  random_scope: concept_concept_block_only
+  fixed_blocks: c2y_task_rows_and_all_non_c2c_entries
+  base_dag: ./data/CelebA/final_DAG_unfair.csv
+  original_total_edges: 18
+  new_total_edges: 16
+  original_c2c_edges: 10
+  new_c2c_edges: 8
+  total_c2c_positions: 49
+  c2c_density: 0.16326530612244897
+  c2c_edge_multiplier: 0.8
+  random_seed: 10043
+  no_side_channel: true
+  source_experiment_type: concept_concept_density

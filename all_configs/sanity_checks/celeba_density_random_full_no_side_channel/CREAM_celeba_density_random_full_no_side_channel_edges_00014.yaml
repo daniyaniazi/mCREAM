@@ -1,0 +1,45 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_celeba_density_random_full_no_side_channel/edges_00014
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+model_name: Standard_CelebA
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  DAG_file: ./data/CelebA/density_random_full/final_DAG_unfair_edges_00014.csv
+  input_model_path: ./pretrained_models/CelebA/version_11/checkpoints/epoch=89-step=6840.ckpt
+hyperparameters_model2:
+  num_classes: 1
+  num_exogenous: 7
+  num_side_channel: 0
+  num_concepts: 7
+  masking_algorithm: zuko
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: true
+  concept_representation: soft
+  side_dropout: true
+  dropout_prob: 0.8
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 0.75
+  frozen_model1: true
+trainer_param:
+  max_epochs: 200
+sanity_check:
+  dataset: celeba
+  experiment_type: density_random_full
+  graph_variant: edges_00014
+  random_scope: full_dag_matrix_including_diagonal_and_task_rows
+  base_dag: ./data/CelebA/final_DAG_unfair.csv
+  original_edge_count: 18
+  random_edge_count: 14
+  total_positions: 64
+  density: 0.21875
+  random_seed: 10043
+  no_side_channel: true
+  source_experiment_type: density_random_full

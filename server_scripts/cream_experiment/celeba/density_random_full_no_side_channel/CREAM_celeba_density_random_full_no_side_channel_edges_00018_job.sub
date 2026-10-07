@@ -1,0 +1,15 @@
+universe                = docker
+docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/celeba/density_random_full_no_side_channel/run_CREAM_celeba_density_random_full_no_side_channel_edges_00018.sh
+
+output                  = /home/dani00003/mCREAM/logs/CREAM_celeba_density_random_full_no_side_channel_edges_00018.$(ClusterId).$(ProcId).out
+error                   = /home/dani00003/mCREAM/logs/CREAM_celeba_density_random_full_no_side_channel_edges_00018.$(ClusterId).$(ProcId).err
+log                     = /home/dani00003/mCREAM/logs/CREAM_celeba_density_random_full_no_side_channel_edges_00018.$(ClusterId).log
+
+request_GPUs            = 1
+request_CPUs            = 8
+request_memory          = 32G
+requirements            = UidDomain == "cs.uni-saarland.de"
++WantGPUHomeMounted     = true
+queue 1
