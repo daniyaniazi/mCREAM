@@ -16,7 +16,7 @@ paths:
   softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
 hyperparameters_model2:
   num_classes: 10
-  num_exogenous: 22
+  num_exogenous: 88
   num_side_channel: 0
   num_concepts: 11
   masking_algorithm: zuko

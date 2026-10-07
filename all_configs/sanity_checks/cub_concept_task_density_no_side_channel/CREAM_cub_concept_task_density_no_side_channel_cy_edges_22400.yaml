@@ -1,10 +1,10 @@
 mode: train_cbm
-seed: [42,7,1,134,89]
+seed: 42
 experiment_name: CREAM_cub_concept_task_density_no_side_channel/cy_edges_22400
 dataset_name: CUB
 dataset_params:
   batch_size: 64
-  workers: 2
+  workers: 0
   return_concepts: true
 model_name: Standard_CUB
 paths:
@@ -15,7 +15,7 @@ paths:
   input_model_path: ./pretrained_models/CUB/version_1/checkpoints/epoch=49-step=3750.ckpt
 hyperparameters_model2:
   num_classes: 200
-  num_exogenous: 112
+  num_exogenous: 448
   num_side_channel: 0
   num_concepts: 112
   masking_algorithm: zuko
