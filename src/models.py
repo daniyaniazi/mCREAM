@@ -10,6 +10,7 @@ from torch.optim.adam import Adam
 from torchmetrics.functional import accuracy
 from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss, BCELoss
 from typing import Any, Optional, Union, Callable
+from pathlib import Path
 
 from abc import ABC, abstractmethod
 
@@ -785,6 +786,9 @@ class UtoY_model(Template_MultiClass):
         side_dropout: bool = False,
         dropout_prob: float = 0.0,
         mutually_exclusive_concepts: Optional[list] = None,
+        debug_masking: bool = False,
+        debug_masking_log_path: Optional[str] = None,
+        debug_masking_max_forwards: int = 2,
         **kwargs: Any,
     ) -> None:
         super().__init__(learning_rate=learning_rate, num_classes=num_classes)
@@ -817,6 +821,13 @@ class UtoY_model(Template_MultiClass):
         self.ctoy_depth = kwargs.get("ctoy_depth", None)
         self.concept_representation = concept_representation
         self.mutually_exclusive_concepts = mutually_exclusive_concepts
+        self.debug_masking = debug_masking
+        self.debug_masking_log_path = debug_masking_log_path
+        self.debug_masking_max_forwards = debug_masking_max_forwards
+        self._mask_debug_forward_count = 0
+        self._mask_debug_active = False
+        self._mask_debug_hooks = []
+        self._mask_debug_node_names = None
         # print("mutex concepts", self.mutually_exclusive_concepts)
         # print("len groups", len(self.mutually_exclusive_concepts))
         self.group_interventions = False
@@ -837,7 +848,232 @@ class UtoY_model(Template_MultiClass):
 
         self.init_concept_task(last_layer_mask)
 
+        if self.debug_masking and self.debug_masking_log_path:
+            self.configure_mask_debug(self.debug_masking_log_path)
+
         self.save_hyperparameters()
+
+    def configure_mask_debug(
+        self,
+        log_path: str,
+        experiment_name: str = "",
+        dag_path: str = "",
+        node_names: Optional[list[str]] = None,
+        max_forwards: Optional[int] = None,
+    ) -> None:
+        """Write a bounded trace of the graph mask and its effect in forward()."""
+        for hook in self._mask_debug_hooks:
+            hook.remove()
+        self._mask_debug_hooks.clear()
+        self.debug_masking = True
+        self.debug_masking_log_path = str(log_path)
+        if max_forwards is not None:
+            self.debug_masking_max_forwards = int(max_forwards)
+        self._mask_debug_node_names = node_names
+        self._mask_debug_forward_count = 0
+
+        log_file = Path(self.debug_masking_log_path)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write("\n" + "=" * 100 + "\n")
+            handle.write(f"experiment={experiment_name}\n")
+            handle.write(f"dag_file={dag_path}\n")
+            handle.write(
+                "model dimensions: "
+                f"num_concepts={self.num_concepts}, num_classes={self.num_classes}, "
+                f"num_exogenous={self.num_exogenous}, "
+                f"num_side_channel={self.num_side_channel}, "
+                f"Uc_dim={self.num_exogenous - self.num_side_channel}, "
+                f"input_per_concept={(self.num_exogenous - self.num_side_channel) // self.num_concepts}\n"
+            )
+
+            if self.causal_graph is not None:
+                c2c = self.u2c_graph.detach().cpu().bool()
+                edge_pairs = torch.nonzero(c2c, as_tuple=False).tolist()
+                names = self._mask_debug_node_names
+                if names and len(names) >= self.num_concepts:
+                    edge_labels = [
+                        f"row_node={names[row]}, col_node={names[col]} [row={row}, col={col}]"
+                        for row, col in edge_pairs
+                    ]
+                else:
+                    edge_labels = [f"row={row}, col={col}" for row, col in edge_pairs]
+                handle.write(
+                    f"loaded_DAG_shape={tuple(self.causal_graph.shape)}; "
+                    f"C2C_shape={tuple(c2c.shape)}; C2C_edges={len(edge_pairs)}\n"
+                )
+                handle.write("C2C adjacency true positions (CSV row, CSV column):\n")
+                handle.write("  " + ("\n  ".join(edge_labels) if edge_labels else "<none>") + "\n")
+
+                c2y = self.c2y_graph.detach().cpu().bool()
+                task_edges = torch.nonzero(c2y, as_tuple=False).tolist()
+                handle.write(
+                    f"C2Y/task block shape={tuple(c2y.shape)}; "
+                    f"edges={len(task_edges)}; true positions (task row, source column):\n"
+                )
+                handle.write(
+                    "  "
+                    + (
+                        "\n  ".join(
+                            f"task_row={row}, source_column={col}"
+                            for row, col in task_edges[:300]
+                        )
+                        if task_edges
+                        else "<none>"
+                    )
+                    + ("\n  ... truncated after 300 entries" if len(task_edges) > 300 else "")
+                    + "\n"
+                )
+
+                expanded = self.multidim_concept_graph.detach().cpu().bool()
+                input_per_concept = expanded.shape[1] // self.num_concepts
+                handle.write(
+                    f"expanded_u2c_mask_shape={tuple(expanded.shape)}; "
+                    f"input_dims_per_source_concept={input_per_concept}; "
+                    f"expanded_active_entries={int(expanded.sum())}\n"
+                )
+                handle.write("Expanded mask by output row and source-concept block:\n")
+                for out_idx, row_mask in enumerate(expanded):
+                    allowed_blocks = []
+                    for source_idx in range(self.num_concepts):
+                        start = source_idx * input_per_concept
+                        end = start + input_per_concept
+                        if bool(row_mask[start:end].any()):
+                            allowed_blocks.append(source_idx)
+                    handle.write(
+                        f"  output_concept={out_idx}; allowed_input_blocks={allowed_blocks}; "
+                        f"active_input_dims={int(row_mask.sum())}\n"
+                    )
+
+        u2c_hooks = self._register_mask_debug_hooks("u2c", self.u2c_model)
+        task_hooks = self._register_mask_debug_hooks("task", self.last_layer)
+        if not u2c_hooks:
+            self._mask_debug_write(
+                "WARNING: no masked linear layer with an inspectable mask was found under u2c_model."
+            )
+            self._mask_debug_write(f"u2c_model structure: {self.u2c_model!r}")
+        if not task_hooks:
+            self._mask_debug_write(
+                "WARNING: no masked linear layer with an inspectable mask was found under task head."
+            )
+
+    @staticmethod
+    def _mask_debug_tensor_stats(tensor: Tensor) -> str:
+        values = tensor.detach().float().cpu()
+        if values.numel() == 0:
+            return f"shape={tuple(values.shape)} empty"
+        return (
+            f"shape={tuple(values.shape)} min={values.min().item():.6g} "
+            f"max={values.max().item():.6g} mean={values.mean().item():.6g} "
+            f"std={values.std(unbiased=False).item():.6g}"
+        )
+
+    def _mask_debug_write(self, message: str) -> None:
+        if self.debug_masking_log_path:
+            with open(self.debug_masking_log_path, "a", encoding="utf-8") as handle:
+                handle.write(message.rstrip() + "\n")
+
+    def _register_mask_debug_hooks(self, stage: str, module_root: nn.Module) -> int:
+        registered = 0
+        for name, module in module_root.named_modules():
+            direct_buffers = dict(module.named_buffers(recurse=False))
+            mask = getattr(module, "mask", None)
+            if not isinstance(mask, Tensor):
+                mask = next(
+                    (value for key, value in direct_buffers.items() if "mask" in key.lower()),
+                    None,
+                )
+            weight = getattr(module, "weight", None)
+            if not isinstance(weight, Tensor) or not isinstance(mask, Tensor):
+                continue
+
+            full_name = f"{stage}.{name or '<root>'}"
+
+            def pre_hook(layer, inputs, layer_name=full_name, layer_mask=mask):
+                if not self._mask_debug_active or not inputs or not isinstance(inputs[0], Tensor):
+                    return
+                x = inputs[0]
+                w = getattr(layer, "weight", None)
+                self._mask_debug_write(
+                    f"  LAYER PRE {layer_name}: input {self._mask_debug_tensor_stats(x)}"
+                )
+                if isinstance(w, Tensor):
+                    mask_for_weight = layer_mask.to(device=w.device, dtype=w.dtype)
+                    if mask_for_weight.shape != w.shape and mask_for_weight.T.shape == w.shape:
+                        mask_for_weight = mask_for_weight.T
+                    if mask_for_weight.shape != w.shape:
+                        self._mask_debug_write(
+                            f"    MASK/WEIGHT SHAPE MISMATCH: "
+                            f"weight={tuple(w.shape)} mask={tuple(layer_mask.shape)}"
+                        )
+                        return
+                    effective = w.detach() * mask_for_weight
+                    self._mask_debug_write(
+                        f"    mask_shape={tuple(layer_mask.shape)} "
+                        f"active={int(layer_mask.bool().sum())}/{layer_mask.numel()} "
+                        f"raw_weight {self._mask_debug_tensor_stats(w)}"
+                    )
+                    self._mask_debug_write(
+                        f"    effective_weight=raw_weight*mask "
+                        f"{self._mask_debug_tensor_stats(effective)}"
+                    )
+                    if w.ndim == 2 and effective.shape == w.shape:
+                        active = torch.nonzero(mask_for_weight.detach().cpu().bool(), as_tuple=False)
+                        samples = []
+                        sample_contrib = None
+                        if x.ndim == 2 and x.shape[1] == w.shape[1]:
+                            x0 = x[0].detach().float().cpu()
+                            effective_cpu = effective.detach().float().cpu()
+                            sample_contrib = x0.unsqueeze(0) * effective_cpu
+                            per_output = sample_contrib.sum(dim=1)
+                            self._mask_debug_write(
+                                "    sample0 masked linear sums before bias: "
+                                + str([f"{value:+.6g}" for value in per_output.tolist()])
+                            )
+                            bias = getattr(layer, "bias", None)
+                            if isinstance(bias, Tensor):
+                                self._mask_debug_write(
+                                    "    bias: "
+                                    + str([f"{value:+.6g}" for value in bias.detach().float().cpu().tolist()])
+                                )
+                        for out_i, in_i in active[:80].tolist():
+                            entry = f"({out_i},{in_i})w={w[out_i, in_i].detach().item():+.6g}"
+                            if sample_contrib is not None:
+                                entry += f", xw={sample_contrib[out_i, in_i].item():+.6g}"
+                                if layer_name.startswith("u2c."):
+                                    source_idx = in_i // max(
+                                        1,
+                                        (self.num_exogenous - self.num_side_channel)
+                                        // self.num_concepts,
+                                    )
+                                    entry += f", source_block={source_idx}"
+                            samples.append(entry)
+                        self._mask_debug_write(
+                            "    active effective weights (up to 80): "
+                            + (", ".join(samples) if samples else "<none>")
+                        )
+
+            def post_hook(layer, inputs, output, layer_name=full_name):
+                if not self._mask_debug_active or not isinstance(output, Tensor):
+                    return
+                self._mask_debug_write(
+                    f"  LAYER POST {layer_name}: output "
+                    f"{self._mask_debug_tensor_stats(output)}"
+                )
+
+            self._mask_debug_hooks.append(module.register_forward_pre_hook(pre_hook))
+            self._mask_debug_hooks.append(module.register_forward_hook(post_hook))
+            registered += 1
+        return registered
+
+    def _mask_debug_vector(self, label: str, tensor: Tensor, max_items: int = 256) -> None:
+        sample = tensor.detach().reshape(tensor.shape[0], -1)[0].float().cpu()
+        values = sample[:max_items].tolist()
+        suffix = " ..." if sample.numel() > max_items else ""
+        self._mask_debug_write(
+            f"{label}: batch_stats[{self._mask_debug_tensor_stats(tensor)}]; "
+            f"sample0_first{len(values)}={['%.6g' % value for value in values]}{suffix}"
+        )
 
     def init_concept_concept(
         self, masking_algorithm, num_hidden_layers_in_maskedmlp, input_per_concept
@@ -969,14 +1205,42 @@ class UtoY_model(Template_MultiClass):
             )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        self._mask_debug_forward_count += 1
+        self._mask_debug_active = bool(
+            self.debug_masking
+            and self._mask_debug_forward_count <= self.debug_masking_max_forwards
+        )
+        if self._mask_debug_active:
+            self._mask_debug_write(
+                "\n"
+                + "-" * 100
+                + f"\nFORWARD {self._mask_debug_forward_count}: input to UtoY_model "
+                + self._mask_debug_tensor_stats(x)
+                + "\n"
+            )
+            self._mask_debug_vector("backbone_features_to_u2u", x)
+
         u = self.u2u_model(x)
+        if self._mask_debug_active:
+            self._mask_debug_vector("u2u_linear_relu_output", u)
 
         # [Uc;Uy]
         Uc = u[:, : self.num_exogenous - self.num_side_channel]
         Uy = u[:, self.num_exogenous - self.num_side_channel :]
+        if self._mask_debug_active:
+            self._mask_debug_vector("Uc_before_C2C_masked_layer", Uc)
+            self._mask_debug_write(
+                f"Uy_side_channel_shape={tuple(Uy.shape)}; "
+                f"side_channel_enabled={self.num_side_channel > 0}\n"
+            )
+
         concept_before_activation = self.u2c_model(Uc)
+        if self._mask_debug_active:
+            self._mask_debug_vector("concept_logits_after_masked_layer_before_activation", concept_before_activation)
 
         c = self.concept_activation_function(concept_before_activation)
+        if self._mask_debug_active:
+            self._mask_debug_vector("concept_vector_after_activation", c)
 
         if self.side_dropout is True and self.masking_algorithm == "none":
             s = self.side_channel(Uc)
@@ -989,7 +1253,13 @@ class UtoY_model(Template_MultiClass):
             y = self.last_layer(last_layer_input)
 
         else:
+            last_layer_input = c
             y = self.last_layer(c)
+        if self._mask_debug_active:
+            self._mask_debug_vector("task_head_input_after_concept_activation", last_layer_input)
+            self._mask_debug_vector("task_logits_after_task_head", y)
+            self._mask_debug_write("END FORWARD TRACE\n")
+        self._mask_debug_active = False
         return y, c
 
     def concept_activation_function(self, c: Tensor) -> Tensor:
