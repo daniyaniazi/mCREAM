@@ -22,13 +22,6 @@ DEFAULT_FAMILIES = [
     "concept_task_reduced_topology",
 ]
 
-NO_SIDE_BASE_CONFIGS = {
-    "celeba": "all_configs/best_hparams/CREAM_no_side_channel/CREAM_no_side_best_celeba.yaml",
-    "cub": "all_configs/best_hparams/CREAM_no_side_channel/CREAM_no_side_best_cub_soft_config.yaml",
-    "cfmnist": "all_configs/best_hparams/CREAM_no_side_channel/CREAM_no_side_best_cfmnist_soft_config.yaml",
-}
-
-
 def extract_dag_path(config_text: str) -> Path:
     for line in config_text.splitlines():
         if line.strip().startswith("DAG_file:"):
@@ -45,6 +38,38 @@ def extract_sanity_block(config_text: str) -> str:
     return ""
 
 
+def strip_sanity_block(config_text: str) -> str:
+    lines = config_text.splitlines()
+    for idx, line in enumerate(lines):
+        if line.startswith("sanity_check:"):
+            return "\n".join(lines[:idx]).rstrip() + "\n"
+    return config_text
+
+
+def extract_hparam_int(config_text: str, key: str) -> int:
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{key}:"):
+            return int(stripped.split(":", 1)[1].strip())
+    raise ValueError(f"Could not find hyperparameters_model2.{key}.")
+
+
+def replace_hparam_int(config_text: str, key: str, value: int) -> str:
+    lines = []
+    replaced = False
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{key}:"):
+            indent = line[: len(line) - len(line.lstrip())]
+            lines.append(f"{indent}{key}: {value}")
+            replaced = True
+        else:
+            lines.append(line)
+    if not replaced:
+        raise ValueError(f"Could not replace hyperparameters_model2.{key}.")
+    return "\n".join(lines) + "\n"
+
+
 def variant_from_config_name(dataset_key: str, family: str, path: Path) -> str:
     prefix = f"CREAM_{dataset_key}_{family}_"
     stem = path.stem
@@ -59,10 +84,21 @@ def make_config_text(dataset_key: str, family: str, variant: str, source_text: s
     experiment_name = f"{experiment_prefix}/{variant}"
     dag_path = extract_dag_path(source_text)
     sanity_block = extract_sanity_block(source_text)
+    old_num_exogenous = extract_hparam_int(source_text, "num_exogenous")
+    old_num_side_channel = extract_hparam_int(source_text, "num_side_channel")
+    concept_exogenous = old_num_exogenous - old_num_side_channel
 
-    base_text = (PROJECT_ROOT / NO_SIDE_BASE_CONFIGS[dataset_key]).read_text()
-    text = upsert_experiment_name(base_text, experiment_name)
+    text = upsert_experiment_name(strip_sanity_block(source_text), experiment_name)
     text = replace_dag_path(text, dag_path)
+    text = replace_hparam_int(text, "num_exogenous", concept_exogenous)
+    text = replace_hparam_int(text, "num_side_channel", 0)
+    text = (
+        text.rstrip()
+        + "\n\n"
+        + "debug_masking:\n"
+        + "  enabled: true\n"
+        + "  max_forwards: 2\n"
+    )
     if sanity_block:
         text = (
             text.rstrip()

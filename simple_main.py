@@ -250,6 +250,31 @@ def my_main(config_path: Path) -> None:
                     # raise NotImplementedError
                     model2 = UtoY_model(**hyperparams_model2)
 
+                debug_masking_config = config.get("debug_masking", {})
+                if isinstance(debug_masking_config, bool):
+                    debug_masking_config = {"enabled": debug_masking_config}
+                if debug_masking_config.get("enabled", False):
+                    debug_log_path = Path(
+                        debug_masking_config.get(
+                            "log_path",
+                            default_root_dir
+                            / config_simple_name_version
+                            / "mask_debug.log",
+                        )
+                    )
+                    model2.configure_mask_debug(
+                        log_path=str(debug_log_path),
+                        experiment_name=config_simple_name_version,
+                        dag_path=config["paths"].get("DAG_file", "<no DAG file>"),
+                        node_names=(
+                            [str(name) for name in df_dag.index]
+                            if "DAG_file" in config["paths"]
+                            else None
+                        ),
+                        max_forwards=debug_masking_config.get("max_forwards", 2),
+                    )
+                    print(f"Masking debug log: {debug_log_path}")
+
                 num_hyperparameters = {
                     key: hyperparams_model2[key]
                     for key in [
