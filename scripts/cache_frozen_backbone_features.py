@@ -1,8 +1,12 @@
 import argparse
 from pathlib import Path
+import sys
 
 import torch
 from torch.utils.data import DataLoader, Dataset
+
+# Running this file directly puts scripts/ rather than the repository root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.utils import get_component_with_dicts, load_config
 
