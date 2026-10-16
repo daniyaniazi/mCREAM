@@ -1,0 +1,32 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_celeba_graph_free_u2u_reference
+dataset_name: CelebA
+dataset_params:
+  batch_size: 256
+  workers: 2
+  class_name: unfair
+model_name: Standard_CelebA
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+hyperparameters_model2:
+  num_classes: 1
+  num_exogenous: 70
+  num_side_channel: 0
+  num_concepts: 7
+  masking_algorithm: none
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: false
+  concept_representation: soft
+  side_dropout: false
+  dropout_prob: 0.0
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 20
+feature_cache_dir: ./data/fixed_u2u_feature_cache/celeba
+save_u2u_reference: ./experiments/CelebA/train_cbm/Standard_CelebA/fixed_u2u_reference/CREAM_celeba_graph_free_u2u_reference/shared_u2u.pt

@@ -1,0 +1,26 @@
+\begin{table*}[t]
+\centering
+\caption{C--Y topology at fixed edge count. $I(G)$ denotes individual-intervention AUC; $\Delta_{\mathrm{pred}}$ and $\Delta_{\mathrm{int}}$ are absolute changes relative to the original CREAM graph.}
+\label{tab:cy_topology}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Dataset & $|E|$ & $R$ (\%) & $A_{\mathrm{task}}$ & $\Delta_{\mathrm{pred}}$ & $A_{\mathrm{concept}}$ & $I(G)$ & $\Delta_{\mathrm{int}}$ & CCI \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CelebA} & \textbf{7} & \textbf{0.0} & \textbf{81.6} & -- & \textbf{81.0} & \textbf{81.6} & -- & \textbf{1.00} \\
+\midrule
+\rowcolor{gray!15}
+\textbf{cFMNIST} & \textbf{19} & \textbf{0.0} & \textbf{92.4} & -- & \textbf{98.1} & \textbf{97.0} & -- & \textbf{0.96} \\
+cFMNIST & 19 & 0.0 & 92.4 & 0.0 & 98.1 & 97.0 & 0.0 & 0.96 \\
+cFMNIST & 19 & 21.1 & 92.4 & $<0.1\downarrow$ & 97.3 & 96.7 & 0.3$\downarrow$ & 0.89 \\
+cFMNIST & 19 & 52.6 & 92.4 & $<0.1\downarrow$ & 96.9 & 86.6 & 10.4$\downarrow$ & 0.70 \\
+cFMNIST & 19 & 78.9 & 92.3 & 0.1$\downarrow$ & 93.6 & 75.9 & 21.1$\downarrow$ & 0.46 \\
+cFMNIST & 19 & 100.0 & 92.5 & 0.1$\uparrow$ & 92.9 & 77.3 & 19.6$\downarrow$ & 0.08 \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CUB} & \textbf{22,400} & \textbf{0.0} & \textbf{72.7} & -- & \textbf{86.8} & \textbf{85.8} & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table*}

@@ -32,6 +32,10 @@ hyperparameters:
   frozen_model1: true
 trainer_param:
   max_epochs: 50
+
+debug_masking:
+  enabled: true
+  max_forwards: 2
 sanity_check:
   dataset: cfmnist
   experiment_type: concept_task_reduced_topology

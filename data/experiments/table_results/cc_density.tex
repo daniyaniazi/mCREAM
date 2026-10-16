@@ -1,0 +1,36 @@
+\begin{table*}[t]
+\centering
+\caption{C--C graph density. $I(G)$ denotes individual-intervention AUC; $\Delta_{\mathrm{pred}}$ and $\Delta_{\mathrm{int}}$ are absolute changes relative to the original CREAM graph.}
+\label{tab:cc_density}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & $|E|$ & $A_{\mathrm{task}}$ & $\Delta_{\mathrm{pred}}$ & $A_{\mathrm{concept}}$ & $I(G)$ & $\Delta_{\mathrm{int}}$ & CCI \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CelebA} & \textbf{10} & \textbf{81.6} & -- & \textbf{81.0} & \textbf{81.6} & -- & \textbf{1.00} \\
+CelebA & 5 & 81.7 & 0.1$\uparrow$ & 78.2 & 80.6 & 1.0$\downarrow$ & 1.00 \\
+CelebA & 8 & 83.1 & 1.5$\uparrow$ & 80.2 & 82.9 & 1.2$\uparrow$ & 1.00 \\
+CelebA & 10 & 82.3 & 0.7$\uparrow$ & 81.6 & 81.5 & 0.1$\downarrow$ & 1.00 \\
+CelebA & 12 & 82.1 & 0.4$\uparrow$ & 80.9 & 81.8 & 0.2$\uparrow$ & 1.00 \\
+CelebA & 15 & 83.1 & 1.4$\uparrow$ & 79.9 & 81.8 & 0.1$\uparrow$ & 1.00 \\
+\midrule
+\rowcolor{gray!15}
+\textbf{cFMNIST} & \textbf{17} & \textbf{92.4} & -- & \textbf{98.1} & \textbf{97.0} & -- & \textbf{0.96} \\
+cFMNIST & 8 & 92.4 & 0.1$\downarrow$ & 83.4 & 96.7 & 0.3$\downarrow$ & 0.87 \\
+cFMNIST & 13 & 92.2 & 0.3$\downarrow$ & 97.9 & 96.9 & 0.1$\downarrow$ & 0.96 \\
+cFMNIST & 17 & 92.3 & 0.1$\downarrow$ & 98.1 & 97.0 & $<0.1\downarrow$ & 0.95 \\
+cFMNIST & 21 & 92.5 & 0.1$\uparrow$ & 98.1 & 97.0 & $<0.1\downarrow$ & 0.96 \\
+cFMNIST & 26 & 92.4 & 0.1$\downarrow$ & 98.1 & 96.8 & 0.1$\downarrow$ & 0.96 \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CUB} & \textbf{7,488} & \textbf{72.7} & -- & \textbf{86.8} & \textbf{85.8} & -- & -- \\
+CUB & 3,744 & 72.6 & 0.1$\downarrow$ & 86.7 & 85.6 & 0.1$\downarrow$ & 0.97 \\
+CUB & 5,616 & 72.6 & 0.2$\downarrow$ & 86.9 & 85.7 & 0.1$\downarrow$ & 0.97 \\
+CUB & 7,488 & 72.7 & $<0.1\downarrow$ & 86.9 & 85.9 & 0.2$\uparrow$ & 0.97 \\
+CUB & 9,360 & 72.9 & 0.2$\uparrow$ & 87.0 & 86.0 & 0.3$\uparrow$ & 0.97 \\
+CUB & 11,232 & 73.3 & 0.5$\uparrow$ & 87.0 & 86.2 & 0.5$\uparrow$ & 0.98 \\
+\bottomrule
+\end{tabular}
+\end{table*}

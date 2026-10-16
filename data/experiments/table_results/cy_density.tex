@@ -1,0 +1,32 @@
+\begin{table*}[t]
+\centering
+\caption{C--Y graph density. $I(G)$ denotes individual-intervention AUC; $\Delta_{\mathrm{pred}}$ and $\Delta_{\mathrm{int}}$ are absolute changes relative to the original CREAM graph.}
+\label{tab:cy_density}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & $|E|$ & $A_{\mathrm{task}}$ & $\Delta_{\mathrm{pred}}$ & $A_{\mathrm{concept}}$ & $I(G)$ & $\Delta_{\mathrm{int}}$ & CCI \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CelebA} & \textbf{7} & \textbf{81.6} & -- & \textbf{81.0} & \textbf{81.6} & -- & \textbf{1.00} \\
+CelebA & 4 & 81.1 & 0.5$\downarrow$ & 81.0 & 82.1 & 0.4$\uparrow$ & 1.00 \\
+CelebA & 5 & 82.6 & 1.0$\uparrow$ & 80.6 & 80.8 & 0.8$\downarrow$ & 1.00 \\
+CelebA & 7 & 81.4 & 0.2$\downarrow$ & 81.6 & 81.6 & 0.1$\downarrow$ & 1.00 \\
+\midrule
+\rowcolor{gray!15}
+\textbf{cFMNIST} & \textbf{19} & \textbf{92.4} & -- & \textbf{98.1} & \textbf{97.0} & -- & \textbf{0.96} \\
+cFMNIST & 10 & 92.2 & 0.2$\downarrow$ & 93.1 & 82.6 & 14.3$\downarrow$ & 0.30 \\
+cFMNIST & 14 & 92.0 & 0.5$\downarrow$ & 89.1 & 73.2 & 23.8$\downarrow$ & 0.43 \\
+cFMNIST & 19 & 92.2 & 0.2$\downarrow$ & 94.7 & 84.5 & 12.4$\downarrow$ & 0.52 \\
+cFMNIST & 24 & 92.2 & 0.2$\downarrow$ & 94.3 & 83.1 & 13.9$\downarrow$ & 0.79 \\
+cFMNIST & 28 & 91.7 & 0.7$\downarrow$ & 93.4 & 87.6 & 9.4$\downarrow$ & 0.62 \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CUB} & \textbf{22,400} & \textbf{72.7} & -- & \textbf{86.8} & \textbf{85.8} & -- & -- \\
+CUB & 11,200 & 72.5 & 0.2$\downarrow$ & 86.2 & 76.8 & 9.0$\downarrow$ & 0.93 \\
+CUB & 16,800 & 72.5 & 0.2$\downarrow$ & 86.7 & 82.8 & 3.0$\downarrow$ & 0.96 \\
+CUB & 22,400 & 72.6 & 0.2$\downarrow$ & 86.8 & 85.9 & 0.2$\uparrow$ & 0.97 \\
+\bottomrule
+\end{tabular}
+\end{table*}

@@ -1,0 +1,36 @@
+\begin{table*}[t]
+\centering
+\caption{C--C graph density without side channel. $I(G)$ denotes individual-intervention AUC; $\Delta_{\mathrm{pred}}$ and $\Delta_{\mathrm{int}}$ are absolute changes relative to the original CREAM graph.}
+\label{tab:cc_density_no_side}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & $|E|$ & $A_{\mathrm{task}}$ & $\Delta_{\mathrm{pred}}$ & $A_{\mathrm{concept}}$ & $I(G)$ & $\Delta_{\mathrm{int}}$ & CCI \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CelebA} & \textbf{10} & \textbf{81.6} & -- & \textbf{81.0} & \textbf{81.6} & -- & \textbf{1.00} \\
+CelebA & 5 & 80.6 & 1.1$\downarrow$ & 78.3 & 80.3 & 1.3$\downarrow$ & -- \\
+CelebA & 8 & 80.1 & 1.5$\downarrow$ & 80.2 & 80.0 & 1.7$\downarrow$ & -- \\
+CelebA & 10 & 80.4 & 1.2$\downarrow$ & 80.4 & 80.0 & 1.6$\downarrow$ & -- \\
+CelebA & 12 & 79.7 & 1.9$\downarrow$ & 80.6 & 80.1 & 1.5$\downarrow$ & -- \\
+CelebA & 15 & 81.1 & 0.6$\downarrow$ & 79.4 & 80.5 & 1.2$\downarrow$ & -- \\
+\midrule
+\rowcolor{gray!15}
+\textbf{cFMNIST} & \textbf{17} & \textbf{92.4} & -- & \textbf{98.1} & \textbf{97.0} & -- & \textbf{0.96} \\
+cFMNIST & 8 & 73.8 & 18.6$\downarrow$ & 84.2 & 89.2 & 7.8$\downarrow$ & -- \\
+cFMNIST & 13 & 92.3 & 0.2$\downarrow$ & 98.1 & 97.2 & 0.2$\uparrow$ & -- \\
+cFMNIST & 17 & 92.2 & 0.2$\downarrow$ & 98.1 & 97.2 & 0.2$\uparrow$ & -- \\
+cFMNIST & 21 & 92.6 & 0.2$\uparrow$ & 98.1 & 97.3 & 0.3$\uparrow$ & -- \\
+cFMNIST & 26 & 92.5 & $<0.1\uparrow$ & 98.1 & 97.2 & 0.2$\uparrow$ & -- \\
+\midrule
+\rowcolor{gray!15}
+\textbf{CUB} & \textbf{7,488} & \textbf{72.7} & -- & \textbf{86.8} & \textbf{85.8} & -- & -- \\
+CUB & 3,744 & 71.7 & 1.0$\downarrow$ & 86.4 & 83.7 & 2.1$\downarrow$ & -- \\
+CUB & 5,616 & 72.6 & 0.2$\downarrow$ & 86.5 & 84.2 & 1.6$\downarrow$ & -- \\
+CUB & 7,488 & 72.8 & 0.1$\uparrow$ & 86.6 & 84.0 & 1.8$\downarrow$ & -- \\
+CUB & 9,360 & 72.9 & 0.1$\uparrow$ & 86.7 & 84.0 & 1.8$\downarrow$ & -- \\
+CUB & 11,232 & 72.7 & $<0.1\downarrow$ & 86.7 & 84.2 & 1.5$\downarrow$ & -- \\
+\bottomrule
+\end{tabular}
+\end{table*}

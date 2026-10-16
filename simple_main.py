@@ -7,6 +7,7 @@ from src.models import (
     X2C_model,
 )
 from src.utils import get_component_with_dicts, load_config, dict_to_csv, run_benchmark
+from src.fixed_feature_cache import CachedFeatureBackbone, CachedFeatureDataModule
 from pathlib import Path
 import time
 from pandas import read_csv
@@ -144,6 +145,10 @@ def my_main(config_path: Path) -> None:
     else:
         dataset = dataset_class(**config["dataset_params"])
 
+    feature_cache_dir = config.get("feature_cache_dir")
+    if feature_cache_dir:
+        dataset = CachedFeatureDataModule(dataset, feature_cache_dir)
+
     model_class = get_component_with_dicts("model", model_name)
 
     if "train" in mode:  ## Training a "Standard" model
@@ -208,7 +213,9 @@ def my_main(config_path: Path) -> None:
 
             elif mode == "train_cbm":
                 # first model
-                if "input_model_path" not in config["paths"]:
+                if feature_cache_dir:
+                    model1 = CachedFeatureBackbone()
+                elif "input_model_path" not in config["paths"]:
                     # training from scratch
                     hyperparams_model1 = {
                         "num_classes": config["hyperparameters_model2"]["num_classes"],
@@ -230,12 +237,13 @@ def my_main(config_path: Path) -> None:
                     df_dag = read_csv(config["paths"]["DAG_file"], index_col=0)
                     # Convert the DataFrame to a NumPy array, then to a boolean (torch.bool) tensor
                     whole_causal_graph = torch.tensor(df_dag.values, dtype=torch.bool)
-
+                    softmax_mask = None
                     if "softmax_mask" in config["paths"]:
                         from json import load
 
                         with open(config["paths"]["softmax_mask"], "r") as file:
                             softmax_mask = load(file)
+                    if softmax_mask is not None:
                         model2 = UtoY_model(
                             **hyperparams_model2,
                             causal_graph=whole_causal_graph,
@@ -247,8 +255,43 @@ def my_main(config_path: Path) -> None:
                         )
 
                 else:
-                    # raise NotImplementedError
-                    model2 = UtoY_model(**hyperparams_model2)
+                    softmax_mask = None
+                    if "softmax_mask" in config["paths"]:
+                        from json import load
+
+                        with open(config["paths"]["softmax_mask"], "r") as file:
+                            softmax_mask = load(file)
+                    model2 = UtoY_model(
+                        **hyperparams_model2,
+                        mutually_exclusive_concepts=softmax_mask,
+                    )
+
+                shared_u2u_file = config["paths"].get("shared_u2u_file")
+                if shared_u2u_file:
+                    u2u_payload = torch.load(
+                        shared_u2u_file, map_location="cpu", weights_only=False
+                    )
+                    expected_dims = (
+                        model2.num_exogenous,
+                        model2.num_side_channel,
+                        model2.previous_model_output_size,
+                    )
+                    reference_dims = (
+                        u2u_payload["num_exogenous"],
+                        u2u_payload["num_side_channel"],
+                        u2u_payload["previous_model_output_size"],
+                    )
+                    if expected_dims != reference_dims:
+                        raise ValueError(
+                            "Shared U2U dimensions do not match this run: "
+                            f"reference={reference_dims}, run={expected_dims}"
+                        )
+                    model2.u2u_model.load_state_dict(
+                        u2u_payload["state_dict"], strict=True
+                    )
+                    for parameter in model2.u2u_model.parameters():
+                        parameter.requires_grad_(False)
+                    print(f"Loaded frozen shared U2U weights: {shared_u2u_file}")
 
                 debug_masking_config = config.get("debug_masking", {})
                 if isinstance(debug_masking_config, bool):
@@ -324,6 +367,20 @@ def my_main(config_path: Path) -> None:
         torch.cuda.synchronize()
         starting_time = time.perf_counter()
         trainer.fit(model, dataset)
+        shared_u2u_output = config.get("save_u2u_reference")
+        if shared_u2u_output:
+            target = Path(shared_u2u_output)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {
+                    "state_dict": model.u_to_CY.u2u_model.state_dict(),
+                    "num_exogenous": model.u_to_CY.num_exogenous,
+                    "num_side_channel": model.u_to_CY.num_side_channel,
+                    "previous_model_output_size": model.u_to_CY.previous_model_output_size,
+                },
+                target,
+            )
+            print(f"Saved graph-free shared U2U weights: {target}")
         torch.cuda.synchronize()
         process_end_time = time.perf_counter()
 
