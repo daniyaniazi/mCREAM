@@ -1,5 +1,6 @@
 from pandas import DataFrame
 
+import hashlib
 import torch
 from torch import BoolTensor, nn
 
@@ -926,11 +927,15 @@ class UtoY_model(Template_MultiClass):
                 )
 
                 expanded = self.multidim_concept_graph.detach().cpu().bool()
+                expanded_fingerprint = hashlib.sha256(
+                    expanded.contiguous().numpy().tobytes()
+                ).hexdigest()[:16]
                 input_per_concept = expanded.shape[1] // self.num_concepts
                 handle.write(
                     f"expanded_u2c_mask_shape={tuple(expanded.shape)}; "
                     f"input_dims_per_source_concept={input_per_concept}; "
-                    f"expanded_active_entries={int(expanded.sum())}\n"
+                    f"expanded_active_entries={int(expanded.sum())}; "
+                    f"expanded_mask_sha256={expanded_fingerprint}\n"
                 )
                 handle.write("Expanded mask by output row and source-concept block:\n")
                 for out_idx, row_mask in enumerate(expanded):
@@ -1008,10 +1013,29 @@ class UtoY_model(Template_MultiClass):
                         )
                         return
                     effective = w.detach() * mask_for_weight
+                    forbidden = ~mask_for_weight.bool()
+                    forbidden_values = w.detach()[forbidden]
+                    forbidden_max_abs = (
+                        forbidden_values.abs().max().item()
+                        if forbidden_values.numel()
+                        else 0.0
+                    )
+                    forbidden_nonzero = (
+                        int(torch.count_nonzero(forbidden_values).item())
+                        if forbidden_values.numel()
+                        else 0
+                    )
                     self._mask_debug_write(
                         f"    mask_shape={tuple(layer_mask.shape)} "
                         f"active={int(layer_mask.bool().sum())}/{layer_mask.numel()} "
                         f"raw_weight {self._mask_debug_tensor_stats(w)}"
+                    )
+                    self._mask_debug_write(
+                        f"    forbidden_weight_check: entries={forbidden_values.numel()} "
+                        f"raw_nonzero={forbidden_nonzero} "
+                        f"raw_max_abs={forbidden_max_abs:.6g}; "
+                        f"effective_forbidden_max_abs="
+                        f"{effective[forbidden].abs().max().item() if forbidden_values.numel() else 0.0:.6g}"
                     )
                     self._mask_debug_write(
                         f"    effective_weight=raw_weight*mask "
@@ -1066,12 +1090,16 @@ class UtoY_model(Template_MultiClass):
             registered += 1
         return registered
 
-    def _mask_debug_vector(self, label: str, tensor: Tensor, max_items: int = 256) -> None:
+    def _mask_debug_vector(self, label: str, tensor: Tensor, max_items: int = 1024) -> None:
         sample = tensor.detach().reshape(tensor.shape[0], -1)[0].float().cpu()
         values = sample[:max_items].tolist()
         suffix = " ..." if sample.numel() > max_items else ""
+        fingerprint = hashlib.sha256(
+            sample.contiguous().numpy().tobytes()
+        ).hexdigest()[:16]
         self._mask_debug_write(
             f"{label}: batch_stats[{self._mask_debug_tensor_stats(tensor)}]; "
+            f"sample0_sha256={fingerprint}; "
             f"sample0_first{len(values)}={['%.6g' % value for value in values]}{suffix}"
         )
 
