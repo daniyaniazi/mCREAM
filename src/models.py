@@ -1121,7 +1121,7 @@ class UtoY_model(Template_MultiClass):
 
             # handles exogenous per concepts
 
-            multidim_concept_graph = self._replicate_columns(
+            self.multidim_concept_graph = self._replicate_columns(
                 self.u2c_graph,
                 input_per_concept,  ### Kronecker product
             )
@@ -1142,12 +1142,13 @@ class UtoY_model(Template_MultiClass):
             # assert self.multidim_task_graph.shape[1] == num_side_channel + num_concepts
             assert self.multidim_task_graph.shape[0] == self.num_classes
             assert (
-                multidim_concept_graph.shape[0] <= multidim_concept_graph.shape[1]
+                self.multidim_concept_graph.shape[0]
+                <= self.multidim_concept_graph.shape[1]
             )  # check that input is bigger than concepts
 
             # check adjmatrix contains exactly as many outputs as concepts
             assert (
-                multidim_concept_graph.shape[1]
+                self.multidim_concept_graph.shape[1]
                 == self.num_exogenous - self.num_side_channel
             )
 
@@ -1155,9 +1156,9 @@ class UtoY_model(Template_MultiClass):
                 # if num_hidden_layers_in_maskedmlp >= 0:
                 # if depth==0 then this is maskedLinear, WITHOUT activation. Activation is handled in forward function!
                 self.u2c_model = MaskedMLP(
-                    multidim_concept_graph,
+                    self.multidim_concept_graph,
                     hidden_features=[
-                        multidim_concept_graph.shape[0]
+                        self.multidim_concept_graph.shape[0]
                         for _ in range(num_hidden_layers_in_maskedmlp)
                     ],
                 )
