@@ -1,0 +1,34 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_cub_graph_free_u2u_u2c_reference
+dataset_name: CUB
+dataset_params:
+  batch_size: 64
+  workers: 0
+  return_concepts: true
+model_name: Standard_CUB
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  softmax_mask: ./data/CUB/CUB_mutually_exclusive_concepts.json
+hyperparameters_model2:
+  num_classes: 200
+  num_exogenous: 448
+  num_side_channel: 0
+  num_concepts: 112
+  masking_algorithm: none
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 512
+  last_layer_mask: false
+  concept_representation: group_soft
+  side_dropout: false
+  dropout_prob: 0.0
+hyperparameters:
+  learning_rate: 0.0001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 300
+feature_cache_dir: ./data/fixed_u2u_feature_cache/cub
+save_u2u_reference: ./experiments/CUB/train_cbm/Standard_CUB/fixed_u2u_fixed_u2c_reference/CREAM_cub_graph_free_u2u_u2c_reference/shared_u2u.pt
+save_u2c_reference: ./experiments/CUB/train_cbm/Standard_CUB/fixed_u2u_fixed_u2c_reference/CREAM_cub_graph_free_u2u_u2c_reference/shared_u2c.pt

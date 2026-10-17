@@ -790,6 +790,9 @@ class UtoY_model(Template_MultiClass):
         debug_masking: bool = False,
         debug_masking_log_path: Optional[str] = None,
         debug_masking_max_forwards: int = 2,
+        debug_tensor_capture_path: Optional[str] = None,
+        debug_tensor_capture_max_batches: int = 2,
+        debug_tensor_capture_metadata: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(learning_rate=learning_rate, num_classes=num_classes)
@@ -829,6 +832,12 @@ class UtoY_model(Template_MultiClass):
         self._mask_debug_active = False
         self._mask_debug_hooks = []
         self._mask_debug_node_names = None
+        self.debug_tensor_capture_path = debug_tensor_capture_path
+        self.debug_tensor_capture_max_batches = int(debug_tensor_capture_max_batches)
+        self.debug_tensor_capture_metadata = debug_tensor_capture_metadata or {}
+        self._mask_tensor_capture_active = False
+        self._mask_tensor_capture_records = []
+        self._mask_tensor_capture_row = 0
         # print("mutex concepts", self.mutually_exclusive_concepts)
         # print("len groups", len(self.mutually_exclusive_concepts))
         self.group_interventions = False
@@ -861,6 +870,9 @@ class UtoY_model(Template_MultiClass):
         dag_path: str = "",
         node_names: Optional[list[str]] = None,
         max_forwards: Optional[int] = None,
+        tensor_capture_path: Optional[str] = None,
+        tensor_capture_max_batches: Optional[int] = None,
+        tensor_capture_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """Write a bounded trace of the graph mask and its effect in forward()."""
         for hook in self._mask_debug_hooks:
@@ -872,6 +884,12 @@ class UtoY_model(Template_MultiClass):
             self.debug_masking_max_forwards = int(max_forwards)
         self._mask_debug_node_names = node_names
         self._mask_debug_forward_count = 0
+        if tensor_capture_path is not None:
+            self.debug_tensor_capture_path = str(tensor_capture_path)
+        if tensor_capture_max_batches is not None:
+            self.debug_tensor_capture_max_batches = int(tensor_capture_max_batches)
+        if tensor_capture_metadata is not None:
+            self.debug_tensor_capture_metadata = dict(tensor_capture_metadata)
 
         log_file = Path(self.debug_masking_log_path)
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -887,6 +905,16 @@ class UtoY_model(Template_MultiClass):
                 f"Uc_dim={self.num_exogenous - self.num_side_channel}, "
                 f"input_per_concept={(self.num_exogenous - self.num_side_channel) // self.num_concepts}\n"
             )
+            for stage, module in (("u2u", self.u2u_model), ("u2c", self.u2c_model)):
+                for name, parameter in module.named_parameters():
+                    values = parameter.detach().cpu().contiguous()
+                    fingerprint = hashlib.sha256(
+                        values.numpy().tobytes()
+                    ).hexdigest()[:16]
+                    handle.write(
+                        f"{stage}_parameter={name}; shape={tuple(parameter.shape)}; "
+                        f"requires_grad={parameter.requires_grad}; sha256={fingerprint}\n"
+                    )
 
             if self.causal_graph is not None:
                 c2c = self.u2c_graph.detach().cpu().bool()
@@ -961,6 +989,115 @@ class UtoY_model(Template_MultiClass):
             self._mask_debug_write(
                 "WARNING: no masked linear layer with an inspectable mask was found under task head."
             )
+
+    def begin_mask_debug_tensor_capture(self) -> None:
+        """Capture a few final-test batches for cross-graph representation analysis."""
+        self._mask_tensor_capture_records = []
+        self._mask_tensor_capture_row = 0
+        self._mask_tensor_capture_active = bool(self.debug_tensor_capture_path)
+
+    def finish_mask_debug_tensor_capture(self) -> Optional[str]:
+        self._mask_tensor_capture_active = False
+        if not self.debug_tensor_capture_path or not self._mask_tensor_capture_records:
+            return None
+
+        target = Path(self.debug_tensor_capture_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "format_version": 1,
+            "metadata": {
+                **self.debug_tensor_capture_metadata,
+                "num_concepts": self.num_concepts,
+                "num_exogenous": self.num_exogenous,
+                "num_side_channel": self.num_side_channel,
+                "concept_representation": self.concept_representation,
+                "capture_split": "test",
+            },
+            "graph": {
+                "c2c_mask": (
+                    self.u2c_graph.detach().cpu().bool()
+                    if hasattr(self, "u2c_graph")
+                    else None
+                ),
+                "expanded_u2c_mask": (
+                    self.multidim_concept_graph.detach().cpu().bool()
+                    if hasattr(self, "multidim_concept_graph")
+                    else None
+                ),
+                "u2c_layers": self._mask_debug_layer_parameters(self.u2c_model),
+            },
+            "records": self._mask_tensor_capture_records,
+        }
+        torch.save(payload, target)
+        self._mask_debug_write(
+            f"Saved tensor capture: {target} "
+            f"({len(self._mask_tensor_capture_records)} test batches)"
+        )
+        return str(target)
+
+    @staticmethod
+    def _mask_debug_layer_parameters(module_root: nn.Module) -> dict[str, dict[str, Tensor]]:
+        layers = {}
+        for name, module in module_root.named_modules():
+            weight = getattr(module, "weight", None)
+            if not isinstance(weight, Tensor):
+                continue
+            mask = getattr(module, "mask", None)
+            if not isinstance(mask, Tensor):
+                mask = next(
+                    (value for key, value in module.named_buffers(recurse=False) if "mask" in key.lower()),
+                    None,
+                )
+            raw_weight = weight.detach().cpu()
+            entry = {"weight": raw_weight}
+            if isinstance(mask, Tensor):
+                mask = mask.detach().cpu().bool()
+                if mask.shape != raw_weight.shape and mask.T.shape == raw_weight.shape:
+                    mask = mask.T
+                entry["mask"] = mask
+                if mask.shape == raw_weight.shape:
+                    entry["effective_weight"] = raw_weight * mask.to(raw_weight.dtype)
+            layers[name or "<root>"] = entry
+        return layers
+
+    def _capture_mask_debug_batch(
+        self,
+        backbone_features: Tensor,
+        u2u_output: Tensor,
+        uc: Tensor,
+        concept_logits: Tensor,
+        concept_scores: Tensor,
+        task_logits: Tensor,
+    ) -> None:
+        if not self._mask_tensor_capture_active:
+            return
+        if len(self._mask_tensor_capture_records) >= self.debug_tensor_capture_max_batches:
+            return
+
+        batch_size = int(backbone_features.shape[0])
+        dims_per_concept = (self.num_exogenous - self.num_side_channel) // self.num_concepts
+        uc_blocks = uc.reshape(batch_size, self.num_concepts, dims_per_concept)
+        tensors = {
+            "backbone_features": backbone_features,
+            "u2u_output": u2u_output,
+            "uc_before_c2c": uc,
+            "uc_extended_blocks": uc_blocks,
+            "concept_logits": concept_logits,
+            "concept_scores": concept_scores,
+            "task_logits": task_logits,
+        }
+        self._mask_tensor_capture_records.append({
+            "test_row_indices": torch.arange(
+                self._mask_tensor_capture_row,
+                self._mask_tensor_capture_row + batch_size,
+                dtype=torch.long,
+            ),
+            "tensors": {
+                key: value.detach().float().cpu().contiguous()
+                for key, value in tensors.items()
+            },
+        })
+        self._mask_tensor_capture_row += batch_size
 
     @staticmethod
     def _mask_debug_tensor_stats(tensor: Tensor) -> str:
@@ -1288,6 +1425,7 @@ class UtoY_model(Template_MultiClass):
             self._mask_debug_vector("task_head_input_after_concept_activation", last_layer_input)
             self._mask_debug_vector("task_logits_after_task_head", y)
             self._mask_debug_write("END FORWARD TRACE\n")
+        self._capture_mask_debug_batch(x, u, Uc, concept_before_activation, c, y)
         self._mask_debug_active = False
         return y, c
 

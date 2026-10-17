@@ -33,7 +33,7 @@ def read_yaml(path: Path) -> dict:
 
 def write_yaml(path: Path, config: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
+    with path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(config, handle, sort_keys=False, allow_unicode=False)
 
 
@@ -112,7 +112,25 @@ def make_reference_config(dataset_key: str, source: dict) -> tuple[dict, Path]:
     return config, path
 
 
-def generate_dataset(dataset_key: str) -> list[str]:
+def make_u2c_reference_config(dataset_key: str, source: dict) -> tuple[dict, Path]:
+    config, _ = make_reference_config(dataset_key, source)
+    experiment = f"CREAM_{dataset_key}_graph_free_u2u_u2c_reference"
+    reference_root = (
+        f"./experiments/{config['dataset_name']}/train_cbm/{config['model_name']}"
+        f"/fixed_u2u_fixed_u2c_reference/{experiment}"
+    )
+    config["experiment_name"] = experiment
+    config["save_u2u_reference"] = f"{reference_root}/shared_u2u.pt"
+    config["save_u2c_reference"] = f"{reference_root}/shared_u2c.pt"
+    path = (
+        CONFIG_ROOT.parent
+        / "fixed_u2u_fixed_u2c_reference"
+        / f"{dataset_key}_graph_free_u2u_u2c.yaml"
+    )
+    return config, path
+
+
+def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
     meta = DATASETS[dataset_key]
     source_path = first_source_config(dataset_key)
     source = read_yaml(source_path)
@@ -137,6 +155,18 @@ def generate_dataset(dataset_key: str) -> list[str]:
         f"{meta['server_dir']}/reference",
     )
 
+    fixed_u2c_reference, fixed_u2c_reference_path = make_u2c_reference_config(
+        dataset_key, source
+    )
+    write_yaml(fixed_u2c_reference_path, fixed_u2c_reference)
+    fixed_u2c_reference_name = f"train_{dataset_key}_graph_free_u2u_u2c_reference"
+    write_job(
+        dataset_key,
+        fixed_u2c_reference_name,
+        f'"$CONDA_PYTHON" simple_main.py --config {fixed_u2c_reference_path.relative_to(PROJECT_ROOT).as_posix()}',
+        f"{meta['server_dir']}/reference_fixed_u2c",
+    )
+
     submit_cache = SCRIPT_ROOT / f"submit_cache_{dataset_key}_features.sh"
     submit_cache.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
@@ -151,8 +181,18 @@ def generate_dataset(dataset_key: str) -> list[str]:
         encoding="utf-8",
     )
     submit_reference.chmod(0o755)
+    submit_fixed_u2c_reference = (
+        SCRIPT_ROOT / f"submit_reference_{dataset_key}_u2u_u2c.sh"
+    )
+    submit_fixed_u2c_reference.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        f"condor_submit server_scripts/cream_experiment/fixed_u2u/{meta['server_dir']}/reference_fixed_u2c/{fixed_u2c_reference_name}_job.sub\n",
+        encoding="utf-8",
+    )
+    submit_fixed_u2c_reference.chmod(0o755)
 
     generated_submits = []
+    generated_fixed_u2c_submits = []
     for family in FAMILIES:
         source_dir = PROJECT_ROOT / "all_configs" / "sanity_checks" / f"{dataset_key}_{family}"
         configs = sorted(source_dir.glob("*.yaml"))
@@ -160,9 +200,21 @@ def generate_dataset(dataset_key: str) -> list[str]:
             print(f"Skipping missing family configs: {source_dir}")
             continue
         output_family = f"{family}_fixed_u2u"
+        fixed_u2c_family = f"{family}_fixed_u2u_fixed_u2c"
         output_dir = CONFIG_ROOT / f"{dataset_key}_{output_family}"
         server_dir = PROJECT_ROOT / "server_scripts" / "cream_experiment" / meta["server_dir"] / output_family
         submit_lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
+        fixed_u2c_output_dir = (
+            CONFIG_ROOT.parent / "fixed_u2u_fixed_u2c" / f"{dataset_key}_{fixed_u2c_family}"
+        )
+        fixed_u2c_server_dir = (
+            PROJECT_ROOT
+            / "server_scripts"
+            / "cream_experiment"
+            / meta["server_dir"]
+            / fixed_u2c_family
+        )
+        fixed_u2c_submit_lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
         for config_path in configs:
             config = read_yaml(config_path)
             old_experiment = config["experiment_name"]
@@ -177,7 +229,8 @@ def generate_dataset(dataset_key: str) -> list[str]:
             out_path = output_dir / config_path.name.replace(
                 "_no_side_channel_", "_no_side_channel_fixed_u2u_"
             )
-            write_yaml(out_path, config)
+            if not out_path.exists():
+                write_yaml(out_path, config)
 
             job_name = f"{new_prefix}_{variant}"
             run_path = server_dir / f"run_{job_name}.sh"
@@ -211,14 +264,79 @@ def generate_dataset(dataset_key: str) -> list[str]:
             submit_lines.append(
                 f"condor_submit server_scripts/cream_experiment/{meta['server_dir']}/{output_family}/{sub_path.name}"
             )
+
+            fixed_u2c_config = copy.deepcopy(config)
+            fixed_u2c_prefix = f"{new_prefix}_fixed_u2c"
+            fixed_u2c_config["experiment_name"] = f"{fixed_u2c_prefix}/{variant}"
+            fixed_u2c_config["paths"]["shared_u2u_file"] = fixed_u2c_reference[
+                "save_u2u_reference"
+            ]
+            fixed_u2c_config["paths"]["shared_u2c_file"] = fixed_u2c_reference[
+                "save_u2c_reference"
+            ]
+            fixed_u2c_config["sanity_check"]["fixed_u2c_reference"] = (
+                fixed_u2c_reference["save_u2c_reference"]
+            )
+            fixed_u2c_config["sanity_check"]["fixed_u2u_reference"] = (
+                fixed_u2c_reference["save_u2u_reference"]
+            )
+            fixed_u2c_out_path = fixed_u2c_output_dir / config_path.name.replace(
+                "_no_side_channel_fixed_u2u_",
+                "_no_side_channel_fixed_u2u_fixed_u2c_",
+            )
+            write_yaml(fixed_u2c_out_path, fixed_u2c_config)
+
+            fixed_u2c_job_name = f"{fixed_u2c_prefix}_{variant}"
+            fixed_u2c_server_dir.mkdir(parents=True, exist_ok=True)
+            fixed_u2c_run_path = fixed_u2c_server_dir / f"run_{fixed_u2c_job_name}.sh"
+            fixed_u2c_sub_path = fixed_u2c_server_dir / f"{fixed_u2c_job_name}_job.sub"
+            fixed_u2c_config_rel = fixed_u2c_out_path.relative_to(PROJECT_ROOT).as_posix()
+            fixed_u2c_run_path.write_text(
+                "#!/usr/bin/env bash\nset -euo pipefail\n\n"
+                f'PROJECT_ROOT="{PROJECT_ROOT_SERVER}"\n'
+                f'CONDA_PYTHON="{CONDA_PYTHON_SERVER}"\n'
+                'cd "$PROJECT_ROOT"\n'
+                '"$CONDA_PYTHON" simple_main.py --config '
+                f'"{fixed_u2c_config_rel}"\n',
+                encoding="utf-8",
+            )
+            fixed_u2c_run_path.chmod(0o755)
+            fixed_u2c_sub_path.write_text(
+                "universe                = docker\n"
+                f"docker_image            = {DOCKER_IMAGE}\n"
+                f"initialdir              = {PROJECT_ROOT_SERVER}\n"
+                f"executable              = {PROJECT_ROOT_SERVER}/server_scripts/cream_experiment/{meta['server_dir']}/{fixed_u2c_family}/{fixed_u2c_run_path.name}\n\n"
+                f"output                  = {PROJECT_ROOT_SERVER}/logs/{fixed_u2c_job_name}.$(ClusterId).$(ProcId).out\n"
+                f"error                   = {PROJECT_ROOT_SERVER}/logs/{fixed_u2c_job_name}.$(ClusterId).$(ProcId).err\n"
+                f"log                     = {PROJECT_ROOT_SERVER}/logs/{fixed_u2c_job_name}.$(ClusterId).log\n\n"
+                "request_GPUs            = 1\nrequest_CPUs            = 8\nrequest_memory          = 32G\n"
+                'requirements            = UidDomain == "cs.uni-saarland.de"\n'
+                "+WantGPUHomeMounted     = true\nqueue 1\n",
+                encoding="utf-8",
+            )
+            fixed_u2c_sub_path.chmod(0o755)
+            fixed_u2c_submit_lines.append(
+                f"condor_submit server_scripts/cream_experiment/{meta['server_dir']}/{fixed_u2c_family}/{fixed_u2c_sub_path.name}"
+            )
         submit_path = server_dir / f"submit_all_{dataset_key}_{output_family}.sh"
         submit_path.write_text("\n".join(submit_lines) + "\n", encoding="utf-8")
         submit_path.chmod(0o755)
         generated_submits.append(
             f"server_scripts/cream_experiment/{meta['server_dir']}/{output_family}/{submit_path.name}"
         )
+        fixed_u2c_submit_path = fixed_u2c_server_dir / (
+            f"submit_all_{dataset_key}_{fixed_u2c_family}.sh"
+        )
+        fixed_u2c_submit_path.parent.mkdir(parents=True, exist_ok=True)
+        fixed_u2c_submit_path.write_text(
+            "\n".join(fixed_u2c_submit_lines) + "\n", encoding="utf-8"
+        )
+        fixed_u2c_submit_path.chmod(0o755)
+        generated_fixed_u2c_submits.append(
+            f"server_scripts/cream_experiment/{meta['server_dir']}/{fixed_u2c_family}/{fixed_u2c_submit_path.name}"
+        )
 
-    return generated_submits
+    return generated_submits, generated_fixed_u2c_submits, str(submit_fixed_u2c_reference.relative_to(PROJECT_ROOT).as_posix())
 
 
 def main() -> None:
@@ -231,10 +349,15 @@ def main() -> None:
         raise ValueError(f"Unknown datasets: {unknown}")
 
     all_submits = []
+    all_fixed_u2c_submits = []
+    fixed_u2c_reference_submits = []
     cache_submits = []
     reference_submits = []
     for key in keys:
-        all_submits.extend(generate_dataset(key))
+        generated, generated_fixed_u2c, fixed_u2c_reference_submit = generate_dataset(key)
+        all_submits.extend(generated)
+        all_fixed_u2c_submits.extend(generated_fixed_u2c)
+        fixed_u2c_reference_submits.append(fixed_u2c_reference_submit)
         meta = DATASETS[key]
         cache_submits.append(
             f"server_scripts/cream_experiment/fixed_u2u/submit_cache_{key}_features.sh"
@@ -246,7 +369,9 @@ def main() -> None:
     for name, lines in (
         ("submit_all_feature_caches.sh", cache_submits),
         ("submit_all_u2u_references.sh", reference_submits),
+        ("submit_all_u2u_u2c_references.sh", fixed_u2c_reference_submits),
         ("submit_all_graph_variants_fixed_u2u.sh", all_submits),
+        ("submit_all_graph_variants_fixed_u2u_fixed_u2c.sh", all_fixed_u2c_submits),
     ):
         path = SCRIPT_ROOT / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -258,8 +383,8 @@ def main() -> None:
         )
         path.chmod(0o755)
 
-    print(f"Generated fixed-U2U experiment configs and jobs for {', '.join(keys)}")
-    print("Run cache jobs first, then reference jobs, then graph-variant jobs.")
+    print(f"Generated fixed-U2U and fixed-U2U+U2C configs/jobs for {', '.join(keys)}")
+    print("Run cache jobs first, then reference jobs, then the desired graph-variant jobs.")
 
 
 if __name__ == "__main__":

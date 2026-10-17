@@ -1,0 +1,35 @@
+mode: train_cbm
+seed: 42
+experiment_name: CREAM_cfmnist_graph_free_u2u_u2c_reference
+dataset_name: Complete_Concept_FMNIST
+dataset_params:
+  batch_size: 256
+  workers: 2
+  return_labels: true
+  return_images: true
+model_name: Standard_FashionMNIST
+paths:
+  default_root_dir: ./experiments/
+  metric_dir: ./last_metrics/
+  softmax_mask: ./data/FashionMNIST/mutually_exclusive_relationships_COMPLETE.json
+hyperparameters_model2:
+  num_classes: 10
+  num_exogenous: 88
+  num_side_channel: 0
+  num_concepts: 11
+  masking_algorithm: none
+  num_hidden_layers_in_maskedmlp: 0
+  previous_model_output_size: 128
+  last_layer_mask: false
+  concept_representation: group_soft
+  side_dropout: false
+  dropout_prob: 0.0
+hyperparameters:
+  learning_rate: 0.001
+  lambda_weight: 1
+  frozen_model1: true
+trainer_param:
+  max_epochs: 50
+feature_cache_dir: ./data/fixed_u2u_feature_cache/cfmnist
+save_u2u_reference: ./experiments/Complete_Concept_FMNIST/train_cbm/Standard_FashionMNIST/fixed_u2u_fixed_u2c_reference/CREAM_cfmnist_graph_free_u2u_u2c_reference/shared_u2u.pt
+save_u2c_reference: ./experiments/Complete_Concept_FMNIST/train_cbm/Standard_FashionMNIST/fixed_u2u_fixed_u2c_reference/CREAM_cfmnist_graph_free_u2u_u2c_reference/shared_u2c.pt

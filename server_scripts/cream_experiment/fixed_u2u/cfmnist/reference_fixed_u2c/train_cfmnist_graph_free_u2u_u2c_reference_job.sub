@@ -1,0 +1,15 @@
+universe                = docker
+docker_image            = pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+initialdir              = /home/dani00003/mCREAM
+executable              = /home/dani00003/mCREAM/server_scripts/cream_experiment/fixed_u2u/cfmnist/reference_fixed_u2c/run_train_cfmnist_graph_free_u2u_u2c_reference.sh
+
+output                  = /home/dani00003/mCREAM/logs/train_cfmnist_graph_free_u2u_u2c_reference.$(ClusterId).$(ProcId).out
+error                   = /home/dani00003/mCREAM/logs/train_cfmnist_graph_free_u2u_u2c_reference.$(ClusterId).$(ProcId).err
+log                     = /home/dani00003/mCREAM/logs/train_cfmnist_graph_free_u2u_u2c_reference.$(ClusterId).log
+
+request_GPUs            = 1
+request_CPUs            = 8
+request_memory          = 32G
+requirements            = UidDomain == "cs.uni-saarland.de"
++WantGPUHomeMounted     = true
+queue 1

@@ -14,6 +14,52 @@ from pandas import read_csv
 # from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 
+def load_shared_u2c_weights(model2, reference_path: str) -> None:
+    payload = torch.load(reference_path, map_location="cpu", weights_only=False)
+    expected_dims = (model2.num_concepts, model2.num_exogenous - model2.num_side_channel)
+    if expected_dims != (payload["num_concepts"], payload["input_dim"]):
+        raise ValueError(
+            "Shared U2C dimensions do not match this run: "
+            f"reference={(payload['num_concepts'], payload['input_dim'])}, "
+            f"run={expected_dims}"
+        )
+
+    source = payload["state_dict"]
+    source_weight = source["weight"]
+    target_weights = [
+        (name, parameter)
+        for name, parameter in model2.u2c_model.named_parameters()
+        if parameter.ndim == 2 and tuple(parameter.shape) == tuple(source_weight.shape)
+    ]
+    if len(target_weights) != 1:
+        raise ValueError(
+            "Expected exactly one U2C weight matrix matching the shared reference; "
+            f"found {[name for name, _ in target_weights]} for "
+            f"source shape={tuple(source_weight.shape)}"
+        )
+
+    weight_name, target_weight = target_weights[0]
+    with torch.no_grad():
+        target_weight.copy_(source_weight)
+        if "bias" in source:
+            target_biases = [
+                parameter
+                for parameter in model2.u2c_model.parameters()
+                if parameter.ndim == 1
+                and tuple(parameter.shape) == tuple(source["bias"].shape)
+            ]
+            if len(target_biases) != 1:
+                raise ValueError(
+                    "Expected exactly one U2C bias matching the shared reference; "
+                    f"found {len(target_biases)}"
+                )
+            target_biases[0].copy_(source["bias"])
+
+    for parameter in model2.u2c_model.parameters():
+        parameter.requires_grad_(False)
+    print(f"Loaded and froze shared U2C weights: {reference_path}")
+
+
 def interventions(model, dataset, config, pl_results_dir):
     from src.saving_intermediate_utils import save_activation_percentiles
     from json import load
@@ -293,6 +339,10 @@ def my_main(config_path: Path) -> None:
                         parameter.requires_grad_(False)
                     print(f"Loaded frozen shared U2U weights: {shared_u2u_file}")
 
+                shared_u2c_file = config["paths"].get("shared_u2c_file")
+                if shared_u2c_file:
+                    load_shared_u2c_weights(model2, shared_u2c_file)
+
                 debug_masking_config = config.get("debug_masking", {})
                 if isinstance(debug_masking_config, bool):
                     debug_masking_config = {"enabled": debug_masking_config}
@@ -305,6 +355,14 @@ def my_main(config_path: Path) -> None:
                             / "mask_debug.log",
                         )
                     )
+                    save_debug_tensors = debug_masking_config.get("save_tensors", True)
+                    tensor_capture_path = Path(
+                        debug_masking_config.get(
+                            "tensor_path",
+                            debug_log_path.with_name("mask_debug_tensors.pt"),
+                        )
+                    )
+                    sanity_metadata = config.get("sanity_check", {}) or {}
                     model2.configure_mask_debug(
                         log_path=str(debug_log_path),
                         experiment_name=config_simple_name_version,
@@ -315,8 +373,30 @@ def my_main(config_path: Path) -> None:
                             else None
                         ),
                         max_forwards=debug_masking_config.get("max_forwards", 2),
+                        tensor_capture_path=(
+                            str(tensor_capture_path) if save_debug_tensors else None
+                        ),
+                        tensor_capture_max_batches=debug_masking_config.get(
+                            "tensor_capture_max_batches", 2
+                        ),
+                        tensor_capture_metadata={
+                            "dataset": config.get("dataset_name"),
+                            "seed": config.get("seed"),
+                            "experiment_name": config_simple_name_version,
+                            "family": sanity_metadata.get("source_experiment_type"),
+                            "variant": sanity_metadata.get("graph_variant"),
+                            "dag_file": config["paths"].get("DAG_file"),
+                            "config_path": str(config_path),
+                            "node_names": (
+                                [str(name) for name in df_dag.index]
+                                if "DAG_file" in config["paths"]
+                                else None
+                            ),
+                        },
                     )
                     print(f"Masking debug log: {debug_log_path}")
+                    if save_debug_tensors:
+                        print(f"Masking debug tensors: {tensor_capture_path}")
 
                 num_hyperparameters = {
                     key: hyperparams_model2[key]
@@ -381,6 +461,20 @@ def my_main(config_path: Path) -> None:
                 target,
             )
             print(f"Saved graph-free shared U2U weights: {target}")
+        shared_u2c_output = config.get("save_u2c_reference")
+        if shared_u2c_output:
+            target = Path(shared_u2c_output)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {
+                    "state_dict": model.u_to_CY.u2c_model.state_dict(),
+                    "num_concepts": model.u_to_CY.num_concepts,
+                    "input_dim": model.u_to_CY.num_exogenous
+                    - model.u_to_CY.num_side_channel,
+                },
+                target,
+            )
+            print(f"Saved graph-free shared U2C weights: {target}")
         torch.cuda.synchronize()
         process_end_time = time.perf_counter()
 
@@ -393,7 +487,17 @@ def my_main(config_path: Path) -> None:
         # model testing
         torch.cuda.synchronize()
         starting_time = time.perf_counter()
-        trainer.test(model, dataloaders=dataset)  # test the model immediately
+        tensor_capture_model = model.u_to_CY
+        capture_enabled = bool(tensor_capture_model.debug_tensor_capture_path)
+        if capture_enabled:
+            tensor_capture_model.begin_mask_debug_tensor_capture()
+        try:
+            trainer.test(model, dataloaders=dataset)  # test the model immediately
+        finally:
+            if capture_enabled:
+                saved_capture = tensor_capture_model.finish_mask_debug_tensor_capture()
+                if saved_capture:
+                    print(f"Saved masking activation tensors: {saved_capture}")
         torch.cuda.synchronize()
         process_end_time = time.perf_counter()
         test_time = process_end_time - starting_time
@@ -424,30 +528,30 @@ def my_main(config_path: Path) -> None:
 
             results.update(benchmark_results)
 
-            from src.saving_intermediate_utils import (
-                save_intermediate_values,
-            )
+            if "DAG_file" in config["paths"]:
+                from src.saving_intermediate_utils import save_intermediate_values
 
-            train_latent = save_intermediate_values(
-                dataset=dataset,
-                dataset_name=dataset_name,
-                model=model,
-                training_set=True,
-                DAG_path=config["paths"]["DAG_file"],
-                seed=config["seed"],
-                save_directory=pl_checkpoint_path,
-            )
+                train_latent = save_intermediate_values(
+                    dataset=dataset,
+                    dataset_name=dataset_name,
+                    model=model,
+                    training_set=True,
+                    DAG_path=config["paths"]["DAG_file"],
+                    seed=config["seed"],
+                    save_directory=pl_checkpoint_path,
+                )
 
-            ## Pass the test set through the model
-            test_latent = save_intermediate_values(
-                dataset=dataset,
-                dataset_name=dataset_name,
-                model=model,
-                training_set=False,
-                DAG_path=config["paths"]["DAG_file"],
-                seed=config["seed"],
-                save_directory=pl_checkpoint_path,
-            )
+                test_latent = save_intermediate_values(
+                    dataset=dataset,
+                    dataset_name=dataset_name,
+                    model=model,
+                    training_set=False,
+                    DAG_path=config["paths"]["DAG_file"],
+                    seed=config["seed"],
+                    save_directory=pl_checkpoint_path,
+                )
+            else:
+                print("No DAG_file configured; skipping DAG-labeled intermediate exports.")
 
         ### Side channel metrics
         if "hyperparameters_model2" in config and (
@@ -575,7 +679,10 @@ def my_main(config_path: Path) -> None:
                 results[concept_set + "_debugging_sage_metrics_side_channel"] = None
 
         ### interventions
-        if config["mode"] not in ("train_x2y", "train_backbone"):  # not blackbox
+        if (
+            config["mode"] not in ("train_x2y", "train_backbone")
+            and "DAG_file" in config["paths"]
+        ):  # graph-dependent intervention analysis
             # Enable debug logging for intervention comparison
             import os as _os
             _debug_log = str(Path(pl_checkpoint_path) / "intervention_debug_cream.txt")
