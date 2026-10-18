@@ -385,6 +385,13 @@ def my_main(config_path: Path) -> None:
                             "experiment_name": config_simple_name_version,
                             "family": sanity_metadata.get("source_experiment_type"),
                             "variant": sanity_metadata.get("graph_variant"),
+                            "condition": (
+                                "fixed_u2u_fixed_u2c"
+                                if config["paths"].get("shared_u2c_file")
+                                else "fixed_u2u"
+                                if config["paths"].get("shared_u2u_file")
+                                else "standard"
+                            ),
                             "dag_file": config["paths"].get("DAG_file"),
                             "config_path": str(config_path),
                             "node_names": (
