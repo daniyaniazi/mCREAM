@@ -502,7 +502,17 @@ def my_main(config_path: Path) -> None:
             trainer.test(model, dataloaders=dataset)  # test the model immediately
         finally:
             if capture_enabled:
-                saved_capture = tensor_capture_model.finish_mask_debug_tensor_capture()
+                capture_metrics = {}
+                for key, value in trainer.callback_metrics.items():
+                    if not key.startswith("test_"):
+                        continue
+                    try:
+                        capture_metrics[key] = float(value.detach().cpu().item())
+                    except (AttributeError, RuntimeError, ValueError):
+                        continue
+                saved_capture = tensor_capture_model.finish_mask_debug_tensor_capture(
+                    capture_metrics
+                )
                 if saved_capture:
                     print(f"Saved masking activation tensors: {saved_capture}")
         torch.cuda.synchronize()

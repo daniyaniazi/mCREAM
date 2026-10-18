@@ -380,6 +380,8 @@ class Template_CBM_MultiClass(pl.LightningModule):
 
     def test_step(self, batch: Tensor) -> tuple[Tensor, Tensor]:
         """Defines a single testing step for the model."""
+        if getattr(self.u_to_CY, "_mask_tensor_capture_active", False):
+            self.u_to_CY.set_mask_debug_targets(batch[2], batch[1])
         (
             task_preds,
             concept_preds,
@@ -994,9 +996,20 @@ class UtoY_model(Template_MultiClass):
         """Capture a few final-test batches for cross-graph representation analysis."""
         self._mask_tensor_capture_records = []
         self._mask_tensor_capture_row = 0
+        self._mask_tensor_capture_targets = None
         self._mask_tensor_capture_active = bool(self.debug_tensor_capture_path)
 
-    def finish_mask_debug_tensor_capture(self) -> Optional[str]:
+    def set_mask_debug_targets(self, true_class: Tensor, true_concepts: Tensor) -> None:
+        """Attach the current test batch labels to the forward tensor capture."""
+        if self._mask_tensor_capture_active:
+            self._mask_tensor_capture_targets = {
+                "true_class": true_class.detach().cpu(),
+                "true_concepts": true_concepts.detach().cpu(),
+            }
+
+    def finish_mask_debug_tensor_capture(
+        self, test_metrics: Optional[dict[str, float]] = None
+    ) -> Optional[str]:
         self._mask_tensor_capture_active = False
         if not self.debug_tensor_capture_path or not self._mask_tensor_capture_records:
             return None
@@ -1012,6 +1025,7 @@ class UtoY_model(Template_MultiClass):
                 "num_side_channel": self.num_side_channel,
                 "concept_representation": self.concept_representation,
                 "capture_split": "test",
+                "test_metrics": test_metrics or {},
             },
             "graph": {
                 "c2c_mask": (
@@ -1050,6 +1064,9 @@ class UtoY_model(Template_MultiClass):
                 )
             raw_weight = weight.detach().cpu()
             entry = {"weight": raw_weight}
+            bias = getattr(module, "bias", None)
+            if isinstance(bias, Tensor):
+                entry["bias"] = bias.detach().cpu()
             if isinstance(mask, Tensor):
                 mask = mask.detach().cpu().bool()
                 if mask.shape != raw_weight.shape and mask.T.shape == raw_weight.shape:
@@ -1066,6 +1083,8 @@ class UtoY_model(Template_MultiClass):
         u2u_output: Tensor,
         uc: Tensor,
         concept_logits: Tensor,
+        concept_logits_unmasked: Optional[Tensor],
+        concept_scores_unmasked: Optional[Tensor],
         concept_scores: Tensor,
         task_logits: Tensor,
     ) -> None:
@@ -1086,18 +1105,39 @@ class UtoY_model(Template_MultiClass):
             "concept_scores": concept_scores,
             "task_logits": task_logits,
         }
+        if concept_logits_unmasked is not None:
+            tensors["concept_logits_unmasked"] = concept_logits_unmasked
+        if concept_scores_unmasked is not None:
+            tensors["concept_scores_unmasked"] = concept_scores_unmasked
+        targets = self._mask_tensor_capture_targets
         self._mask_tensor_capture_records.append({
             "test_row_indices": torch.arange(
                 self._mask_tensor_capture_row,
                 self._mask_tensor_capture_row + batch_size,
                 dtype=torch.long,
             ),
+            "targets": targets,
             "tensors": {
                 key: value.detach().float().cpu().contiguous()
                 for key, value in tensors.items()
             },
         })
         self._mask_tensor_capture_row += batch_size
+        self._mask_tensor_capture_targets = None
+
+    def _unmasked_concept_projection(self, uc: Tensor) -> Optional[Tensor]:
+        """Apply the learned dense U2C projection without its graph mask."""
+        for module in self.u2c_model.modules():
+            weight = getattr(module, "weight", None)
+            if (
+                isinstance(weight, Tensor)
+                and weight.ndim == 2
+                and weight.shape[1] == uc.shape[1]
+                and weight.shape[0] == self.num_concepts
+            ):
+                bias = getattr(module, "bias", None)
+                return torch.nn.functional.linear(uc, weight, bias)
+        return None
 
     @staticmethod
     def _mask_debug_tensor_stats(tensor: Tensor) -> str:
@@ -1401,6 +1441,16 @@ class UtoY_model(Template_MultiClass):
             )
 
         concept_before_activation = self.u2c_model(Uc)
+        concept_logits_unmasked = (
+            self._unmasked_concept_projection(Uc)
+            if self._mask_tensor_capture_active
+            else None
+        )
+        concept_scores_unmasked = (
+            self.concept_activation_function(concept_logits_unmasked)
+            if concept_logits_unmasked is not None
+            else None
+        )
         if self._mask_debug_active:
             self._mask_debug_vector("concept_logits_after_masked_layer_before_activation", concept_before_activation)
 
@@ -1425,7 +1475,16 @@ class UtoY_model(Template_MultiClass):
             self._mask_debug_vector("task_head_input_after_concept_activation", last_layer_input)
             self._mask_debug_vector("task_logits_after_task_head", y)
             self._mask_debug_write("END FORWARD TRACE\n")
-        self._capture_mask_debug_batch(x, u, Uc, concept_before_activation, c, y)
+        self._capture_mask_debug_batch(
+            x,
+            u,
+            Uc,
+            concept_before_activation,
+            concept_logits_unmasked,
+            concept_scores_unmasked,
+            c,
+            y,
+        )
         self._mask_debug_active = False
         return y, c
 
