@@ -387,9 +387,14 @@ def my_main(config_path: Path) -> None:
                             "variant": sanity_metadata.get("graph_variant"),
                             "condition": (
                                 "fixed_u2u_fixed_u2c"
+                                if config["paths"].get("shared_u2u_file")
+                                and config["paths"].get("shared_u2c_file")
+                                else "fixed_u2c_only"
                                 if config["paths"].get("shared_u2c_file")
                                 else "fixed_u2u"
                                 if config["paths"].get("shared_u2u_file")
+                                else "fixed_backbone_only"
+                                if feature_cache_dir
                                 else "standard"
                             ),
                             "dag_file": config["paths"].get("DAG_file"),
@@ -662,13 +667,14 @@ def my_main(config_path: Path) -> None:
 
                 explanation_values = dict(zip(test_group_names, sage_values.values))
                 concept_grouped_importance = group_importance_metric(explanation_values)
+                side_channel_importance = explanation_values.get("side_channel", 0.0)
                 print(
                     "\n\n CCI:",
                     concept_grouped_importance,
                     "\n debugging_sage_metrics_concepts",
                     explanation_values["concepts"],
                     "\n debugging_sage_metrics_side_channel",
-                    explanation_values["side_channel"],
+                    side_channel_importance,
                 )
 
                 # add them to the results dict
@@ -676,9 +682,9 @@ def my_main(config_path: Path) -> None:
                 results["debugging_sage_metrics_concepts"] = explanation_values[
                     "concepts"
                 ]
-                results["debugging_sage_metrics_side_channel"] = explanation_values[
-                    "side_channel"
-                ]
+                results["debugging_sage_metrics_side_channel"] = (
+                    side_channel_importance
+                )
                 return results
 
             concept_set = "true_concepts"

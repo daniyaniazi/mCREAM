@@ -8,31 +8,28 @@ def prepare_shap_data(df: DataFrame) -> tuple[DataFrame, Series, dict, list]:
         test_y (pd.Series): Labels for testing.
         column_groups (dict): Dictionary with column group names and column lists.
     """
-    import numpy as np
+    # Intermediate tables omit s_dim_* entirely when no side channel is present.
+    excluded_columns = {"datapoint_idx", "labels"}
+    side_columns = [column for column in df.columns if column.startswith("s_dim_")]
+    concept_columns = [
+        column
+        for column in df.columns
+        if column not in excluded_columns and column not in side_columns
+    ]
+    if "labels" not in df.columns:
+        raise ValueError("SAGE input dataframe must contain a 'labels' column")
+    if not concept_columns:
+        raise ValueError("SAGE input dataframe contains no concept features")
 
-    # Step 2: Identify column groups
-    all_columns = list(df.columns)
-    label_idx = all_columns.index("labels")
-    s_dim_start_idx = all_columns.index("s_dim_0")
+    column_groups_names = {"concepts": concept_columns}
+    if side_columns:
+        column_groups_names["side_channel"] = side_columns
 
-    # Group 1: Columns between "label" and "s_dim_0"
-    group1_columns = all_columns[label_idx + 1 : s_dim_start_idx]
-    # Group 2: Columns from "s_dim_0" to the end
-    group2_columns = all_columns[s_dim_start_idx:]
-
-    column_groups_names = {"concepts": group1_columns, "side_channel": group2_columns}
-
-    # Step 4: Extract test features and labels
-    df_x = df[group1_columns + group2_columns]
+    feature_columns = concept_columns + side_columns
+    df_x = df[feature_columns]
     df_y = df["labels"]
 
-    ### From sage airbnb.ipynb example:
-    feature_names = group1_columns + group2_columns
-    group_names = [group for group in column_groups_names]
     cols = df_x.columns.tolist()
-    for col in feature_names:
-        if np.all([col not in group[1] for group in column_groups_names.items()]):
-            group_names.append(col)
 
     # Group indices
     groups = []
@@ -46,9 +43,9 @@ def prepare_shap_data(df: DataFrame) -> tuple[DataFrame, Series, dict, list]:
 
 
 def group_importance_metric(explanation_values: dict[str, float]) -> float:
-    if len(explanation_values) != 2:
-        raise ValueError(
-            "More than just concepts and side channel. Maybe there is a mistake somewhere?"
-        )
+    if "concepts" not in explanation_values:
+        raise ValueError("SAGE explanation is missing the concepts group")
+    if "side_channel" not in explanation_values:
+        return 1.0
     total_sum = sum(explanation_values.values())
-    return explanation_values["concepts"] / total_sum
+    return explanation_values["concepts"] / total_sum if total_sum else 0.0

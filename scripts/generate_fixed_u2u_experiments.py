@@ -193,6 +193,8 @@ def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
 
     generated_submits = []
     generated_fixed_u2c_submits = []
+    generated_backbone_submits = []
+    generated_u2c_only_submits = []
     for family in FAMILIES:
         source_dir = PROJECT_ROOT / "all_configs" / "sanity_checks" / f"{dataset_key}_{family}"
         configs = sorted(source_dir.glob("*.yaml"))
@@ -215,8 +217,17 @@ def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
             / fixed_u2c_family
         )
         fixed_u2c_submit_lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
+        topology_backbone_family = f"{family}_fixed_backbone"
+        topology_u2c_only_family = f"{family}_fixed_u2c_only"
+        topology_backbone_dir = CONFIG_ROOT.parent / "fixed_backbone" / f"{dataset_key}_{topology_backbone_family}"
+        topology_u2c_only_dir = CONFIG_ROOT.parent / "fixed_u2c_only" / f"{dataset_key}_{topology_u2c_only_family}"
+        topology_backbone_server = PROJECT_ROOT / "server_scripts" / "cream_experiment" / meta["server_dir"] / topology_backbone_family
+        topology_u2c_only_server = PROJECT_ROOT / "server_scripts" / "cream_experiment" / meta["server_dir"] / topology_u2c_only_family
+        topology_backbone_submits = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
+        topology_u2c_only_submits = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
         for config_path in configs:
             config = read_yaml(config_path)
+            source_config = copy.deepcopy(config)
             old_experiment = config["experiment_name"]
             prefix, variant = old_experiment.split("/", 1)
             new_prefix = f"{prefix}_fixed_u2u"
@@ -318,6 +329,61 @@ def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
             fixed_u2c_submit_lines.append(
                 f"condor_submit server_scripts/cream_experiment/{meta['server_dir']}/{fixed_u2c_family}/{fixed_u2c_sub_path.name}"
             )
+
+            if family == "concept_concept_fixcount_topology_no_side_channel":
+                for condition, output_dir, server_dir, submit_lines in (
+                    ("fixed_backbone_only", topology_backbone_dir, topology_backbone_server, topology_backbone_submits),
+                    ("fixed_u2c_only", topology_u2c_only_dir, topology_u2c_only_server, topology_u2c_only_submits),
+                ):
+                    condition_config = copy.deepcopy(source_config)
+                    condition_config["feature_cache_dir"] = cache_dir
+                    condition_prefix = f"{prefix}_{condition}"
+                    condition_config["experiment_name"] = f"{condition_prefix}/{variant}"
+                    condition_config["paths"].pop("shared_u2u_file", None)
+                    condition_config["paths"].pop("shared_u2c_file", None)
+                    condition_config["sanity_check"] = dict(condition_config.get("sanity_check", {}))
+                    condition_config["sanity_check"]["condition"] = condition
+                    condition_config["sanity_check"]["cached_backbone_features"] = cache_dir
+                    if condition == "fixed_u2c_only":
+                        condition_config["paths"]["shared_u2c_file"] = fixed_u2c_reference["save_u2c_reference"]
+                        condition_config["sanity_check"]["fixed_u2c_reference"] = fixed_u2c_reference["save_u2c_reference"]
+
+                    condition_config_path = output_dir / config_path.name.replace(
+                        "_no_side_channel_", f"_no_side_channel_{condition}_"
+                    )
+                    write_yaml(condition_config_path, condition_config)
+                    condition_job_name = f"{condition_prefix}_{variant}"
+                    condition_config_rel = condition_config_path.relative_to(PROJECT_ROOT).as_posix()
+                    condition_run_path = server_dir / f"run_{condition_job_name}.sh"
+                    condition_sub_path = server_dir / f"{condition_job_name}_job.sub"
+                    server_dir.mkdir(parents=True, exist_ok=True)
+                    condition_run_path.write_text(
+                        "#!/usr/bin/env bash\nset -euo pipefail\n\n"
+                        f'PROJECT_ROOT="{PROJECT_ROOT_SERVER}"\n'
+                        f'CONDA_PYTHON="{CONDA_PYTHON_SERVER}"\n'
+                        'cd "$PROJECT_ROOT"\n'
+                        '"$CONDA_PYTHON" simple_main.py --config '
+                        f'"{condition_config_rel}"\n',
+                        encoding="utf-8",
+                    )
+                    condition_run_path.chmod(0o755)
+                    condition_sub_path.write_text(
+                        "universe                = docker\n"
+                        f"docker_image            = {DOCKER_IMAGE}\n"
+                        f"initialdir              = {PROJECT_ROOT_SERVER}\n"
+                        f"executable              = {PROJECT_ROOT_SERVER}/server_scripts/cream_experiment/{meta['server_dir']}/{condition_run_path.parent.name}/{condition_run_path.name}\n\n"
+                        f"output                  = {PROJECT_ROOT_SERVER}/logs/{condition_job_name}.$(ClusterId).$(ProcId).out\n"
+                        f"error                   = {PROJECT_ROOT_SERVER}/logs/{condition_job_name}.$(ClusterId).$(ProcId).err\n"
+                        f"log                     = {PROJECT_ROOT_SERVER}/logs/{condition_job_name}.$(ClusterId).log\n\n"
+                        "request_GPUs            = 1\nrequest_CPUs            = 8\nrequest_memory          = 32G\n"
+                        'requirements            = UidDomain == "cs.uni-saarland.de"\n'
+                        "+WantGPUHomeMounted     = true\nqueue 1\n",
+                        encoding="utf-8",
+                    )
+                    condition_sub_path.chmod(0o755)
+                    submit_lines.append(
+                        f"condor_submit server_scripts/cream_experiment/{meta['server_dir']}/{condition_run_path.parent.name}/{condition_sub_path.name}"
+                    )
         submit_path = server_dir / f"submit_all_{dataset_key}_{output_family}.sh"
         submit_path.write_text("\n".join(submit_lines) + "\n", encoding="utf-8")
         submit_path.chmod(0o755)
@@ -336,7 +402,20 @@ def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
             f"server_scripts/cream_experiment/{meta['server_dir']}/{fixed_u2c_family}/{fixed_u2c_submit_path.name}"
         )
 
-    return generated_submits, generated_fixed_u2c_submits, str(submit_fixed_u2c_reference.relative_to(PROJECT_ROOT).as_posix())
+        if family == "concept_concept_fixcount_topology_no_side_channel":
+            for condition, server_dir, lines, generated in (
+                ("fixed_backbone_only", topology_backbone_server, topology_backbone_submits, generated_backbone_submits),
+                ("fixed_u2c_only", topology_u2c_only_server, topology_u2c_only_submits, generated_u2c_only_submits),
+            ):
+                submit_path = server_dir / f"submit_all_{dataset_key}_{family}_{condition}.sh"
+                submit_path.parent.mkdir(parents=True, exist_ok=True)
+                submit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                submit_path.chmod(0o755)
+                generated.append(
+                    f"server_scripts/cream_experiment/{meta['server_dir']}/{server_dir.name}/{submit_path.name}"
+                )
+
+    return generated_submits, generated_fixed_u2c_submits, generated_backbone_submits, generated_u2c_only_submits, str(submit_fixed_u2c_reference.relative_to(PROJECT_ROOT).as_posix())
 
 
 def main() -> None:
@@ -351,12 +430,16 @@ def main() -> None:
     all_submits = []
     all_fixed_u2c_submits = []
     fixed_u2c_reference_submits = []
+    fixed_backbone_submits = []
+    fixed_u2c_only_submits = []
     cache_submits = []
     reference_submits = []
     for key in keys:
-        generated, generated_fixed_u2c, fixed_u2c_reference_submit = generate_dataset(key)
+        generated, generated_fixed_u2c, generated_backbone, generated_u2c_only, fixed_u2c_reference_submit = generate_dataset(key)
         all_submits.extend(generated)
         all_fixed_u2c_submits.extend(generated_fixed_u2c)
+        fixed_backbone_submits.extend(generated_backbone)
+        fixed_u2c_only_submits.extend(generated_u2c_only)
         fixed_u2c_reference_submits.append(fixed_u2c_reference_submit)
         meta = DATASETS[key]
         cache_submits.append(
@@ -372,6 +455,8 @@ def main() -> None:
         ("submit_all_u2u_u2c_references.sh", fixed_u2c_reference_submits),
         ("submit_all_graph_variants_fixed_u2u.sh", all_submits),
         ("submit_all_graph_variants_fixed_u2u_fixed_u2c.sh", all_fixed_u2c_submits),
+        ("submit_all_c2c_topology_fixed_backbone_only.sh", fixed_backbone_submits),
+        ("submit_all_c2c_topology_fixed_u2c_only.sh", fixed_u2c_only_submits),
     ):
         path = SCRIPT_ROOT / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,7 +468,7 @@ def main() -> None:
         )
         path.chmod(0o755)
 
-    print(f"Generated fixed-U2U and fixed-U2U+U2C configs/jobs for {', '.join(keys)}")
+    print(f"Generated fixed-U2U, fixed-U2U+U2C, fixed-backbone-only, and fixed-U2C-only configs/jobs for {', '.join(keys)}")
     print("Run cache jobs first, then reference jobs, then the desired graph-variant jobs.")
 
 
