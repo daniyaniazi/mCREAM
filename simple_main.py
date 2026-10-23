@@ -612,95 +612,6 @@ def my_main(config_path: Path) -> None:
             print("PFI side importance:", PFI_side_importance)
             results["PFI_side_importance"] = PFI_side_importance
 
-            print("\nStarting SAGE calculation\n")
-
-            def run_sage(concept_set, train_latent, test_latent, config, results):
-                if concept_set == "true_concepts":
-                    sage_df_train = train_latent[1]
-                    sage_df_test = test_latent[1]
-
-                train_x, _, train_group_names, train_groups = prepare_shap_data(
-                    sage_df_train
-                )
-                train_x = train_x.to_numpy()
-
-                test_x, test_y, test_group_names, test_groups = prepare_shap_data(
-                    sage_df_test
-                )
-                test_x = test_x.to_numpy()
-                test_y = test_y.to_numpy()
-
-                assert (train_group_names == test_group_names) and (
-                    train_groups == test_groups
-                )
-
-                ## sage calculation
-                if config["hyperparameters_model2"]["num_classes"] == 1:
-                    explained_model_with_activation = nn.Sequential(
-                        model.u_to_CY.last_layer, nn.Sigmoid()
-                    )
-                else:
-                    explained_model_with_activation = nn.Sequential(
-                        model.u_to_CY.last_layer, nn.Softmax(dim=1)
-                    )
-
-                twenty_percent_index = int(len(sage_df_train) * 0.2)
-                imputer = sage.GroupedMarginalImputer(
-                    explained_model_with_activation,
-                    train_x[:twenty_percent_index],
-                    test_groups,
-                )
-
-                sage_n_jobs = max(1, int(workers))
-                estimator = my_PermutationEstimator(
-                    imputer, "cross entropy", random_state=seed, n_jobs=sage_n_jobs
-                )
-
-                sage_values = estimator(
-                    test_x,
-                    test_y,
-                    batch_size=batch_size,
-                    thresh=0.05,
-                    bar=False,
-                    max_time=None,
-                )
-
-                explanation_values = dict(zip(test_group_names, sage_values.values))
-                concept_grouped_importance = group_importance_metric(explanation_values)
-                side_channel_importance = explanation_values.get("side_channel", 0.0)
-                print(
-                    "\n\n CCI:",
-                    concept_grouped_importance,
-                    "\n debugging_sage_metrics_concepts",
-                    explanation_values["concepts"],
-                    "\n debugging_sage_metrics_side_channel",
-                    side_channel_importance,
-                )
-
-                # add them to the results dict
-                results["CCI"] = concept_grouped_importance
-                results["debugging_sage_metrics_concepts"] = explanation_values[
-                    "concepts"
-                ]
-                results["debugging_sage_metrics_side_channel"] = (
-                    side_channel_importance
-                )
-                return results
-
-            concept_set = "true_concepts"
-            try:
-                results = run_sage(
-                    concept_set, train_latent, test_latent, config, results
-                )
-            except Exception as e:
-                print(f"SAGE failed: {type(e).__name__}: {e}")
-                results["CCI"] = None
-                results["debugging_sage_metrics_concepts"] = None
-                results["debugging_sage_metrics_side_channel"] = None
-                results[concept_set + "_concept_grouped_importance"] = None
-                results[concept_set + "_debugging_sage_metrics_concepts"] = None
-                results[concept_set + "_debugging_sage_metrics_side_channel"] = None
-
         ### interventions
         if (
             config["mode"] not in ("train_x2y", "train_backbone")
@@ -732,6 +643,100 @@ def my_main(config_path: Path) -> None:
                         _w.writeheader(); _w.writerows(_iv_flat)
             except Exception as _e:
                 print(f"WARNING: interventions failed: {_e}")
+
+        ### SAGE attribution (run after interventions so intervention CSVs are saved first)
+        if "hyperparameters_model2" in config and (
+            config["hyperparameters_model2"]["num_side_channel"] > 0
+            or config["hyperparameters_model2"].get("side_dropout", False)
+        ):
+            print("Saving accuracy/intervention metrics before SAGE.")
+            dict_to_csv(results, metrics_dir, config_path)
+            print("\nStarting SAGE calculation (maximum 3600 seconds)\n")
+
+            def run_sage(concept_set, train_latent, test_latent, config, results):
+                if concept_set == "true_concepts":
+                    sage_df_train = train_latent[1]
+                    sage_df_test = test_latent[1]
+
+                train_x, _, train_group_names, train_groups = prepare_shap_data(
+                    sage_df_train
+                )
+                train_x = train_x.to_numpy()
+
+                test_x, test_y, test_group_names, test_groups = prepare_shap_data(
+                    sage_df_test
+                )
+                test_x = test_x.to_numpy()
+                test_y = test_y.to_numpy()
+
+                assert (train_group_names == test_group_names) and (
+                    train_groups == test_groups
+                )
+
+                if config["hyperparameters_model2"]["num_classes"] == 1:
+                    explained_model_with_activation = nn.Sequential(
+                        model.u_to_CY.last_layer, nn.Sigmoid()
+                    )
+                else:
+                    explained_model_with_activation = nn.Sequential(
+                        model.u_to_CY.last_layer, nn.Softmax(dim=1)
+                    )
+
+                twenty_percent_index = int(len(sage_df_train) * 0.2)
+                imputer = sage.GroupedMarginalImputer(
+                    explained_model_with_activation,
+                    train_x[:twenty_percent_index],
+                    test_groups,
+                )
+
+                sage_n_jobs = max(1, int(workers))
+                estimator = my_PermutationEstimator(
+                    imputer, "cross entropy", random_state=seed, n_jobs=sage_n_jobs
+                )
+                sage_values = estimator(
+                    test_x,
+                    test_y,
+                    batch_size=batch_size,
+                    thresh=0.05,
+                    bar=False,
+                    verbose=True,
+                    max_time=3600,
+                )
+
+                explanation_values = dict(zip(test_group_names, sage_values.values))
+                concept_grouped_importance = group_importance_metric(explanation_values)
+                side_channel_importance = explanation_values.get("side_channel", 0.0)
+                print(
+                    "\n\n CCI:",
+                    concept_grouped_importance,
+                    "\n debugging_sage_metrics_concepts",
+                    explanation_values["concepts"],
+                    "\n debugging_sage_metrics_side_channel",
+                    side_channel_importance,
+                )
+
+                results["CCI"] = concept_grouped_importance
+                results["debugging_sage_metrics_concepts"] = explanation_values[
+                    "concepts"
+                ]
+                results["debugging_sage_metrics_side_channel"] = (
+                    side_channel_importance
+                )
+                return results
+
+            concept_set = "true_concepts"
+            try:
+                results = run_sage(
+                    concept_set, train_latent, test_latent, config, results
+                )
+            except Exception as e:
+                print(f"SAGE failed: {type(e).__name__}: {e}")
+                results["CCI"] = None
+                results["debugging_sage_metrics_concepts"] = None
+                results["debugging_sage_metrics_side_channel"] = None
+                results[concept_set + "_concept_grouped_importance"] = None
+                results[concept_set + "_debugging_sage_metrics_concepts"] = None
+                results[concept_set + "_debugging_sage_metrics_side_channel"] = None
 
         dict_to_csv(results, metrics_dir, config_path)
 
