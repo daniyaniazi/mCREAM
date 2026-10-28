@@ -1038,6 +1038,7 @@ class UtoY_model(Template_MultiClass):
                     if hasattr(self, "multidim_concept_graph")
                     else None
                 ),
+                "u2u_layers": self._mask_debug_layer_parameters(self.u2u_model),
                 "u2c_layers": self._mask_debug_layer_parameters(self.u2c_model),
             },
             "records": self._mask_tensor_capture_records,
