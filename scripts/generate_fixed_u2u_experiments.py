@@ -217,7 +217,7 @@ def generate_dataset(dataset_key: str) -> tuple[list[str], list[str]]:
             / fixed_u2c_family
         )
         fixed_u2c_submit_lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
-        topology_backbone_family = f"{family}_fixed_backbone"
+        topology_backbone_family = f"{family}_fixed_backbone_only"
         topology_u2c_only_family = f"{family}_fixed_u2c_only"
         topology_backbone_dir = CONFIG_ROOT.parent / "fixed_backbone" / f"{dataset_key}_{topology_backbone_family}"
         topology_u2c_only_dir = CONFIG_ROOT.parent / "fixed_u2c_only" / f"{dataset_key}_{topology_u2c_only_family}"
