@@ -5,7 +5,7 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
-
+data/
 server_scripts/data/
 experiments/
 data/FashionMNIST/
@@ -17,3 +17,4 @@ logs*/
 Miniconda*.sh
 .env
 *.png
+*.csv
