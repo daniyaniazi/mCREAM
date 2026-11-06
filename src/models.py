@@ -71,14 +71,16 @@ def calculate_mixed_loss(
     target_concepts = target_concepts.float()
     concept_loss = concept_loss_function(concept_logits, target_concepts)
 
+    # Probability outputs use threshold 0.5; raw BCE logits use threshold 0.
+    concept_threshold = 0.0 if isinstance(concept_loss_function, BCEWithLogitsLoss) else 0.5
+    concept_preds = (concept_logits > concept_threshold).int()
+
     concept_acc = accuracy(
         concept_logits,
         target_concepts,
         task="multilabel",
         num_labels=num_concepts,  # AUTOMATICALLY CONVERTS TO PREDICTIONS:  https://lightning.ai/docs/torchmetrics/stable/classification/accuracy.html#torchmetrics.classification.MultilabelAccuracy
     )
-
-    concept_preds = (concept_logits > 0.5).int()
 
     task_loss = task_loss_function(task_logits, y)
 
@@ -375,6 +377,7 @@ class Template_CBM_MultiClass(pl.LightningModule):
             },
             prog_bar=True,
         )
+        self._log_per_concept_accuracy("val", concept_preds, batch[1])
 
         return task_preds, concept_preds
 
@@ -405,6 +408,7 @@ class Template_CBM_MultiClass(pl.LightningModule):
             },
             prog_bar=True,
         )
+        self._log_per_concept_accuracy("test", concept_preds, batch[1])
 
         return task_preds, concept_preds
 
@@ -534,6 +538,22 @@ class Template_CBM_MultiClass(pl.LightningModule):
             num_classes=self.num_classes,
             lambda_weight=self.lambda_weight,
         )
+
+    def _log_per_concept_accuracy(
+        self, stage: str, concept_preds: Tensor, target_concepts: Tensor
+    ) -> None:
+        """Log an epoch-aggregated accuracy for each concept in DAG order."""
+        targets = (target_concepts > 0.5).to(dtype=concept_preds.dtype)
+        per_concept_accuracy = (concept_preds == targets).float().mean(dim=0)
+        for concept_idx, value in enumerate(per_concept_accuracy):
+            self.log(
+                f"{stage}_concept_accuracy_{concept_idx:03d}",
+                value,
+                on_step=False,
+                on_epoch=True,
+                batch_size=target_concepts.shape[0],
+                prog_bar=False,
+            )
 
     def configure_gradient_clipping(  # type: ignore
         self, optimizer, gradient_clip_val, gradient_clip_algorithm

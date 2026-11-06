@@ -544,6 +544,40 @@ def my_main(config_path: Path) -> None:
             **model.hparams,
         }
 
+        # Export per-concept test accuracy in a readable long-form table. The
+        # metric keys use concept indices; DAG row labels provide display names.
+        num_concepts = config.get("hyperparameters_model2", {}).get("num_concepts", 0)
+        concept_names = list(getattr(dataset, "concept_names", []) or [])
+        if not concept_names and config["paths"].get("DAG_file"):
+            concept_names = read_csv(config["paths"]["DAG_file"], index_col=0).index.astype(str).tolist()
+        individual_accuracy_rows = []
+        for concept_idx in range(num_concepts):
+            metric_name = f"test_concept_accuracy_{concept_idx:03d}"
+            if metric_name not in results:
+                continue
+            concept_name = (
+                str(concept_names[concept_idx])
+                if concept_idx < len(concept_names)
+                else f"concept_{concept_idx:03d}"
+            )
+            individual_accuracy_rows.append(
+                {
+                    "concept_index": concept_idx,
+                    "concept_name": concept_name,
+                    "test_concept_accuracy": results[metric_name],
+                }
+            )
+        if individual_accuracy_rows:
+            import csv as _csv
+
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            per_concept_path = metrics_dir / f"{config_path.stem}_per_concept_accuracy.csv"
+            with per_concept_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = _csv.DictWriter(handle, fieldnames=individual_accuracy_rows[0].keys())
+                writer.writeheader()
+                writer.writerows(individual_accuracy_rows)
+            print(f"Saved per-concept test accuracies: {per_concept_path}")
+
         ### efficiency metrics
         if config["mode"] not in ("train_x2y", "train_c2y", "train_backbone"):
             benchmark_results = run_benchmark(model, dataset.test_dataloader())
