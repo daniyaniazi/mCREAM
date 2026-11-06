@@ -16,6 +16,10 @@ class CachedFeatureBackbone(nn.Module):
         super().__init__()
         self.concept_extractor = nn.Identity()
 
+    def forward(self, features: Tensor) -> Tensor:
+        """Match the normal backbone interface for already-extracted features."""
+        return self.concept_extractor(features)
+
 
 class CachedFeatureDataset(Dataset):
     def __init__(self, source: Dataset, cache_path: str | Path) -> None:
