@@ -28,6 +28,7 @@ import glob
 import csv
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,13 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import log_loss, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
+
+# Running `python scripts/analyze_u_information_sharing.py` puts `scripts/`,
+# rather than the repository root, at sys.path[0]. Add the project root so
+# imports such as `src.models` work from the server launcher and Condor alike.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.fixed_feature_cache import CachedFeatureBackbone, CachedFeatureDataModule
 from src.models import Template_CBM_MultiClass, UtoY_model
