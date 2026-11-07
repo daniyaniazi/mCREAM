@@ -433,6 +433,9 @@ def my_main(config_path: Path) -> None:
                     model2,
                     **num_hyperparameters,
                     **hyperparams,
+                    u_ib_enabled=config.get("u_information_bottleneck", {}).get("enabled", False),
+                    u_ib_lambda=config.get("u_information_bottleneck", {}).get("lambda_weight", 0.0),
+                    u_ib_noise_std=config.get("u_information_bottleneck", {}).get("noise_std", 1.0),
                 )
 
         # training time

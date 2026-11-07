@@ -231,6 +231,9 @@ class Template_CBM_MultiClass(pl.LightningModule):
         lambda_weight: float = 0.01,
         frozen_model1: bool = True,
         concept_representation: str = "logits",
+        u_ib_enabled: bool = False,
+        u_ib_lambda: float = 0.0,
+        u_ib_noise_std: float = 1.0,
         # lambda_decay: Optional[float] = None,
     ):
         super().__init__()
@@ -280,6 +283,23 @@ class Template_CBM_MultiClass(pl.LightningModule):
         self.num_concepts = num_concepts
         self.lambda_weight = lambda_weight  # lambda = λ
         self.num_side_channel = num_side_channel
+        self.u_ib_enabled = bool(u_ib_enabled)
+        self.u_ib_lambda = float(u_ib_lambda)
+        self.u_ib_noise_std = float(u_ib_noise_std)
+        self._last_u_ib_mean: Optional[Tensor] = None
+        self._current_u_ib_loss: Optional[Tensor] = None
+        if self.u_ib_enabled:
+            if self.u_ib_lambda < 0:
+                raise ValueError("u_ib_lambda must be non-negative")
+            if self.u_ib_noise_std <= 0:
+                raise ValueError("u_ib_noise_std must be positive when U information bottleneck is enabled")
+            n_u_concept = self.u_to_CY.num_exogenous - self.u_to_CY.num_side_channel
+            if n_u_concept % self.num_concepts:
+                raise ValueError("Concept U width must be divisible by num_concepts for U information bottleneck")
+            self.u_ib_group_width = n_u_concept // self.num_concepts
+            # r_psi(U_k | C_k): one diagonal Gaussian prior for each binary label.
+            self.u_ib_prior_mean = nn.Parameter(torch.zeros(self.num_concepts, 2, self.u_ib_group_width))
+            self.u_ib_prior_logvar = nn.Parameter(torch.zeros(self.num_concepts, 2, self.u_ib_group_width))
 
         # USED FOR INTERVENTIONS
         self.interventions = False
@@ -317,6 +337,17 @@ class Template_CBM_MultiClass(pl.LightningModule):
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         # calculate concepts
         exogenous_variables = self.x_to_u(x)  # also contains side-channel!
+        self._last_u_ib_mean = None
+        if self.u_ib_enabled:
+            n_u_concept = self.u_to_CY.num_exogenous - self.u_to_CY.num_side_channel
+            self._last_u_ib_mean = exogenous_variables[:, :n_u_concept]
+            if self.training:
+                grouped_u = self._last_u_ib_mean.reshape(-1, self.num_concepts, self.u_ib_group_width)
+                noisy_u = grouped_u + self.u_ib_noise_std * torch.randn_like(grouped_u)
+                exogenous_variables = torch.cat(
+                    [noisy_u.reshape(len(noisy_u), n_u_concept), exogenous_variables[:, n_u_concept:]],
+                    dim=1,
+                )
 
         # calculate task
         y, c = self.u_to_CY(exogenous_variables)
@@ -349,6 +380,8 @@ class Template_CBM_MultiClass(pl.LightningModule):
             },
             prog_bar=True,
         )
+        if self.u_ib_enabled:
+            self.log("train_u_ib_loss", self._current_u_ib_loss, prog_bar=False)
 
         return total_loss
 
@@ -377,6 +410,8 @@ class Template_CBM_MultiClass(pl.LightningModule):
             },
             prog_bar=True,
         )
+        if self.u_ib_enabled:
+            self.log("val_u_ib_loss", self._current_u_ib_loss, prog_bar=False)
         self._log_per_concept_accuracy("val", concept_preds, batch[1])
 
         return task_preds, concept_preds
@@ -408,6 +443,8 @@ class Template_CBM_MultiClass(pl.LightningModule):
             },
             prog_bar=True,
         )
+        if self.u_ib_enabled:
+            self.log("test_u_ib_loss", self._current_u_ib_loss, prog_bar=False)
         self._log_per_concept_accuracy("test", concept_preds, batch[1])
 
         return task_preds, concept_preds
@@ -519,6 +556,7 @@ class Template_CBM_MultiClass(pl.LightningModule):
         """convenience function since train/valid/test steps are similar.
         Source: https://docs.wandb.ai/guides/integrations/lightning#log-metrics"""
         x, target_concepts, y = batch
+        self._last_u_ib_mean = None
 
         if self.interventions is True:
             task_logits, concept_output = self.forward_with_interventions_cbm(
@@ -527,7 +565,7 @@ class Template_CBM_MultiClass(pl.LightningModule):
 
         else:
             task_logits, concept_output = self(x)
-        return calculate_mixed_loss(
+        losses = calculate_mixed_loss(
             task_logits=task_logits,
             concept_logits=concept_output,
             target_concepts=target_concepts,
@@ -538,6 +576,34 @@ class Template_CBM_MultiClass(pl.LightningModule):
             num_classes=self.num_classes,
             lambda_weight=self.lambda_weight,
         )
+        if self.u_ib_enabled and self._last_u_ib_mean is not None:
+            u_ib_loss = self._conditional_u_information_loss(
+                self._last_u_ib_mean, target_concepts
+            )
+        else:
+            u_ib_loss = losses[0].new_zeros(())
+        self._current_u_ib_loss = u_ib_loss
+        if self.u_ib_enabled:
+            total_loss = losses[6] + self.u_ib_lambda * u_ib_loss
+            task_loss_percentile = losses[3] / total_loss.clamp_min(1e-12) * 100
+            losses = (*losses[:6], total_loss, task_loss_percentile)
+        return losses
+
+    def _conditional_u_information_loss(self, u_mean: Tensor, concepts: Tensor) -> Tensor:
+        """Variational upper bound on sum_k I(X; U_k | C_k), in nats."""
+        grouped_u = u_mean.reshape(-1, self.num_concepts, self.u_ib_group_width)
+        labels = (concepts.to(device=u_mean.device) > 0.5).long()
+        group_ids = torch.arange(self.num_concepts, device=u_mean.device).unsqueeze(0)
+        prior_mean = self.u_ib_prior_mean[group_ids, labels]
+        prior_logvar = self.u_ib_prior_logvar[group_ids, labels].clamp(-8.0, 8.0)
+        q_logvar = 2.0 * torch.log(u_mean.new_tensor(self.u_ib_noise_std))
+        q_var = self.u_ib_noise_std ** 2
+        kl = 0.5 * (
+            prior_logvar - q_logvar
+            + (q_var + (grouped_u - prior_mean).pow(2)) * torch.exp(-prior_logvar)
+            - 1.0
+        )
+        return kl.sum(dim=-1).sum(dim=-1).mean()
 
     def _log_per_concept_accuracy(
         self, stage: str, concept_preds: Tensor, target_concepts: Tensor

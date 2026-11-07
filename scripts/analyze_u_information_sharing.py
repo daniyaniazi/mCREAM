@@ -114,6 +114,9 @@ def build_model(config: dict[str, Any], checkpoint_path: Path, root: Path, devic
         concept_representation=h.get("concept_representation", "logits"),
         learning_rate=config.get("hyperparameters", {}).get("learning_rate", 1e-4),
         lambda_weight=config.get("hyperparameters", {}).get("lambda_weight", 1.0),
+        u_ib_enabled=config.get("u_information_bottleneck", {}).get("enabled", False),
+        u_ib_lambda=config.get("u_information_bottleneck", {}).get("lambda_weight", 0.0),
+        u_ib_noise_std=config.get("u_information_bottleneck", {}).get("noise_std", 1.0),
     )
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state = payload.get("state_dict", payload)

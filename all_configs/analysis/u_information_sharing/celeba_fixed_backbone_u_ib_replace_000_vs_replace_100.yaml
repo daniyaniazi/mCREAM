@@ -1,0 +1,14 @@
+# Compare fixed-backbone topology models trained with the conditional U information bottleneck.
+dataset: CelebA
+models:
+  - name: replace_000_u_ib
+    config: all_configs/fixed_backbone/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib_replace_000.yaml
+    checkpoint_glob: experiments/CelebA/train_cbm/Standard_CelebA/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/replace_000/lightning_logs/version_*/checkpoints/*.ckpt
+  - name: replace_100_u_ib
+    config: all_configs/fixed_backbone/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib_replace_100.yaml
+    checkpoint_glob: experiments/CelebA/train_cbm/Standard_CelebA/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_u_ib/replace_100/lightning_logs/version_*/checkpoints/*.ckpt
+output_dir: experiments/u_information_sharing/celeba_fixed_backbone_u_ib_replace_000_vs_replace_100
+device: cuda
+probe_c_values: [0.01, 0.1, 1.0, 10.0]
+bootstrap_repetitions: 500
+pairs_per_concept: 100
