@@ -362,7 +362,7 @@ def run_within_model_pair_patching(models, names, data, dags, concept_names, wid
                 clean_ids = torch.tensor([r["clean_image_id"] for r in recs], dtype=torch.long)
                 source_ids = torch.tensor([r["source_image_id"] for r in recs], dtype=torch.long)
                 for source_group in range(k):
-                    # Patch all pairs for this group together, then record permitted outputs only.
+                    # Patch all pairs for this group together and record every output concept.
                     patched = groups_u[clean_ids].reshape(len(recs), k * width).clone()
                     lo, hi = source_group * width, (source_group + 1) * width
                     patched[:, lo:hi] = groups_u[source_ids, source_group, :]
@@ -372,8 +372,6 @@ def run_within_model_pair_patching(models, names, data, dags, concept_names, wid
                         for chunk in patched.split(512)
                     ], dim=0)
                     for target in range(k):
-                        if not adjacency[source_group, target]:
-                            continue
                         delta = patched_logits[:, target] - base_logits[clean_ids, target]
                         pdelta = patched_scores[:, target] - base_scores[clean_ids, target]
                         for r_i, rec in enumerate(recs):
@@ -385,6 +383,7 @@ def run_within_model_pair_patching(models, names, data, dags, concept_names, wid
                                 "model": name, **rec, "source_group_index": source_group,
                                 "source_group_concept": concept_names[source_group],
                                 "predicted_concept_index": target, "predicted_concept": concept_names[target],
+                                "graph_allowed": bool(adjacency[source_group, target]),
                                 "baseline_logit": float(base_logits[clean_ids[r_i], target]),
                                 "patched_logit": float(patched_logits[r_i, target]),
                                 "signed_logit_change": float(delta[r_i]),
@@ -447,7 +446,7 @@ def run_cross_model_patching(models, names, data, dags, concept_names, width, de
                     patched_scores = receiver_model.u_to_CY.concept_activation_function(
                         torch.as_tensor(patched_logits, device=device)
                     ).detach().cpu().numpy()
-                    for target in np.flatnonzero(adjacency[group]):
+                    for target in range(k):
                         delta[start:end, group, target] = torch.from_numpy(
                             patched_logits[:, target] - receiver_logits[start:end, target]
                         )
@@ -455,8 +454,6 @@ def run_cross_model_patching(models, names, data, dags, concept_names, width, de
                             patched_scores[:, target] - receiver_scores[start:end, target]
                         )
                 for target in range(k):
-                    if not adjacency[group, target]:
-                        continue
                     vals = delta[:, group, target].numpy()
                     score_vals = score_delta[:, group, target].numpy()
                     present = receiver_targets[:, target]
@@ -466,6 +463,7 @@ def run_cross_model_patching(models, names, data, dags, concept_names, width, de
                                          "source_group_concept": concept_names[group],
                                          "target_concept_index": target,
                                          "target_concept": concept_names[target],
+                                         "graph_allowed": bool(adjacency[group, target]),
                                          "n_test_images": len(vals),
                                          "mean_signed_logit_change": float(np.nanmean(vals)),
                                          "mean_absolute_logit_change": float(np.nanmean(np.abs(vals))),
@@ -488,6 +486,51 @@ def run_cross_model_patching(models, names, data, dags, concept_names, width, de
     pd.DataFrame(summary_rows).to_csv(output_dir / "cross_model_activation_patch_summary.csv", index=False)
 
 
+@torch.inference_mode()
+def save_single_test_group_ablation(models, names, data, dags, concepts, width, device, output_dir):
+    """Zero each U group for each test row and record every concept-output change."""
+    rows = []
+    k = len(concepts)
+    for name, model, dag in zip(names, models, dags):
+        values = data[name]["test"]
+        u = values["u"][:, :k * width].reshape(-1, k, width)
+        baseline_logits = values["concept_logits"]
+        baseline_scores = values["concept_scores"]
+        targets = values["concept_targets"] > 0.5
+        adjacency = u2c_allowed_source_to_target(dag, k)
+        for source_group in range(k):
+            patched = u.clone()
+            patched[:, source_group, :] = 0
+            patched_flat = patched.reshape(len(patched), k * width)
+            logits = apply_u2c(model, patched_flat, device)
+            scores = torch.cat([
+                model.u_to_CY.concept_activation_function(chunk.to(device)).detach().cpu()
+                for chunk in logits.split(512)
+            ], dim=0)
+            delta = logits - baseline_logits
+            score_delta = scores - baseline_scores
+            for image_id in range(len(u)):
+                for target in range(k):
+                    rows.append({
+                        "model": name,
+                        "image_id": image_id,
+                        "source_group_index": source_group,
+                        "source_group_concept": concepts[source_group],
+                        "target_concept_index": target,
+                        "target_concept": concepts[target],
+                        "graph_allowed": bool(adjacency[source_group, target]),
+                        "target_label": int(targets[image_id, target]),
+                        "baseline_logit": float(baseline_logits[image_id, target]),
+                        "ablated_logit": float(logits[image_id, target]),
+                        "signed_logit_change": float(delta[image_id, target]),
+                        "absolute_logit_change": float(delta[image_id, target].abs()),
+                        "baseline_score": float(baseline_scores[image_id, target]),
+                        "ablated_score": float(scores[image_id, target]),
+                        "signed_score_change": float(score_delta[image_id, target]),
+                    })
+    pd.DataFrame(rows).to_csv(output_dir / "single_test_group_ablation_long.csv", index=False)
+
+
 def save_within_patch_outputs(signed, absolute, score_delta, pair_df, names, concepts, output_dir):
     torch.save({"signed_logit_change": signed, "absolute_logit_change": absolute,
                 "signed_probability_change": score_delta,
@@ -496,7 +539,7 @@ def save_within_patch_outputs(signed, absolute, score_delta, pair_df, names, con
                 "pair_types": ["target_change", "control_same_target"]},
                output_dir / "within_model_activation_patch_effects.pt")
     pair_df.to_csv(output_dir / "within_model_activation_patch_pairs.csv", index=False)
-    summary = pair_df.groupby(["model", "changed_concept", "source_group_concept", "predicted_concept", "pair_type"], as_index=False).agg(
+    summary = pair_df.groupby(["model", "changed_concept", "source_group_concept", "predicted_concept", "graph_allowed", "pair_type"], as_index=False).agg(
         n_pairs=("absolute_logit_change", "count"),
         mean_signed_logit_change=("signed_logit_change", "mean"),
         mean_absolute_logit_change=("absolute_logit_change", "mean"),
@@ -820,6 +863,7 @@ def main():
     save_within_patch_outputs(signed, absolute, probability_delta, patch_pair_df,
                               names, concept_names, outdir)
     run_cross_model_patching(models, names, data, dags, concept_names, width, device, outdir)
+    save_single_test_group_ablation(models, names, data, dags, concept_names, width, device, outdir)
 
     manifest = {
         "dataset_argument": args.dataset,
