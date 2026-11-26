@@ -60,9 +60,13 @@ def main():
             dag_path = root / dag_path
         dag = pd.read_csv(dag_path, index_col=0)
         source, target = int(row["source_index"]), int(row["target_index"])
-        if bool(dag.iloc[target, source]) is False:
+        if not bool(dag.iloc[target, source]):
             raise ValueError(f"Edge {row['edge_id']} is not present at target-row/source-column [{target},{source}]")
-        dag.iloc[target, source] = 0
+        # Keep the graph strictly boolean. Assigning integer 0 into a bool
+        # DataFrame can create an object-typed column in some pandas versions;
+        # simple_main later converts the CSV values directly to a bool tensor.
+        dag.iloc[target, source] = False
+        dag = dag.astype(bool)
         edge_id = str(row["edge_id"])
         graph_path = graph_root / model_name / f"remove_{edge_id}.csv"
         graph_path.parent.mkdir(parents=True, exist_ok=True)
