@@ -1,0 +1,19 @@
+dataset: CelebA
+models:
+  - name: replace_000
+    config: all_configs/fixed_backbone/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_only_replace_000.yaml
+    checkpoint_glob: experiments/CelebA/train_cbm/Standard_CelebA/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_only/replace_000/lightning_logs/version_*/checkpoints/*.ckpt
+  - name: replace_100
+    config: all_configs/fixed_backbone/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_only_replace_100.yaml
+    checkpoint_glob: experiments/CelebA/train_cbm/Standard_CelebA/celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone/CREAM_celeba_concept_concept_fixcount_topology_no_side_channel_fixed_backbone_only/replace_100/lightning_logs/version_*/checkpoints/*.ckpt
+output_dir: experiments/edge_sensitivity/celeba
+device: cuda
+evaluation_splits: [val, test]
+shapley_split: val
+shapley_permutations: 100
+shapley_seed: 2026
+intervention_seed: 421
+metric_batch_size: 1024
+selection_metric: task_accuracy
+top_edges_per_model: 3
+training_seeds: [42]
